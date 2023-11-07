@@ -1,3 +1,4 @@
+from matplotlib.image import AxesImage
 import numpy as np
 from termcolor import colored
 import random
@@ -80,6 +81,17 @@ def random_size(size_range: tuple[int,int]):
     return (rng.randint(*size_range),rng.randint(*size_range))
 
 def generate_map(size: tuple[int,int], **kwargs) -> np.ndarray[int]:
+    """
+    Generates a random map using a simple algorithm. Use the following kwargs to alter the generation of features
+    `lake_count: int`, `lake_volatility: float`, `lake_size_range: tuple[int,int]`
+    `river_count: int`, `river_volatility: float`, `river_length_range: tuple[int,int]`
+    `mountain_count: int`, `mountain_volatility: float`, `mountain_size_range: tuple[int,int]`
+    `forest_count: int`, `forest_volatility: float`, `forest_size_range: tuple[int,int]`
+
+    The count indicates the number of features of the given type to generate (note that some may overlap). If river count is positive, mountain count must be positive.
+    The volatility indicates the erraticity of the generation, basically, the higher it is, the more ragged blobs would be, and the more chaotic rivers will be.
+    Size/Length ranges are a tuple (min,max), inclusive, for the random range to use for blob radii and random path lengths.
+    """
     # Cover the entire area in plains
     result = np.ones(size) * LAND_PLAINS
     
@@ -116,7 +128,6 @@ def generate_map(size: tuple[int,int], **kwargs) -> np.ndarray[int]:
         (random_pos(size), random_blob(random_size(forest_size_range), forest_volatility))
         for _ in range(forest_count)
     ]
-    # TODO: Generate Mountains and Forests
 
     for source,offsets in forests:
         set_offsets(result, source, offsets, LAND_FOREST)
@@ -136,7 +147,8 @@ def print_map(land: np.ndarray[int]):
             print(land_repr[land[i,j]], end="")
         print()
 
-def draw_map(land: np.ndarray[int]):
+def draw_map(land: np.ndarray[int], show = True) -> AxesImage:
     cmap = colors.ListedColormap([land_colors[t] for t in land_types])
     img = plt.imshow(land, cmap=cmap)
-    plt.show()
+    if show: plt.show()
+    return img
