@@ -13,19 +13,86 @@ LAND_FOREST = 1
 LAND_MOUNTAIN = 2
 LAND_WATER = 3
 
-land_types = [LAND_PLAINS, LAND_FOREST, LAND_MOUNTAIN, LAND_WATER]
-land_repr = {
-    LAND_PLAINS: colored("P", "black", "on_light_green"),
-    LAND_FOREST: colored("F", "white", "on_green"),
-    LAND_MOUNTAIN: colored("M", "white", "on_dark_grey"),
-    LAND_WATER: colored("W", "white", "on_blue")
+RESOURCE_ENERGY = 0
+RESOURCE_WOOD = 1
+RESOURCE_ORE = 2
+RESOURCE_FRUIT = 3
+RESOURCE_RAW_FISH = 4
+RESOURCE_COOKED_FISH = 5
+RESOURCESET = {RESOURCE_ENERGY, RESOURCE_WOOD, RESOURCE_ORE, RESOURCE_FRUIT, RESOURCE_RAW_FISH, RESOURCE_COOKED_FISH}
+
+SKILL_CHOPPING = 0
+SKILL_MINING = 1
+SKILL_FISHING = 2
+SKILL_CRAFTING = 3
+SKILL_COMBAT = 4
+SKILLSET = {SKILL_CHOPPING, SKILL_MINING, SKILL_FISHING, SKILL_CRAFTING, SKILL_COMBAT}
+
+skill_training_efficiency = {
+    SKILL_CHOPPING: 1,
+    SKILL_MINING: 1,
+    SKILL_FISHING: 1,
+    SKILL_CRAFTING: 0.5,
+    SKILL_COMBAT: 0
 }
-land_colors = {
-    LAND_PLAINS: '#44ff55',
-    LAND_FOREST: '#00bb00',
-    LAND_MOUNTAIN: '#333355',
-    LAND_WATER: '#0000ff'
-}
+
+def dict_to_array(dictionary: dict[int, float], size: int):
+    result = np.zeros(size)
+    for k,v in dictionary.items(): result[k] = v
+    return result
+
+class LootTable:
+    def __init__(self, base: dict[int, float], skill_resources: dict[int, float], skill_contribution: dict[int, float], skill_improvement: dict[int, float]):
+        self.base = dict_to_array(base, len(RESOURCESET))
+        self.skill_resources = dict_to_array(skill_resources, len(RESOURCESET))
+        self.skill_contribution = dict_to_array(skill_contribution, len(SKILLSET))
+        self.skill_improvement = dict_to_array(skill_improvement, len(SKILLSET))
+    def roll(self, resources: np.ndarray[float], skills: np.ndarray[float]) -> tuple[bool, np.ndarray[float], np.ndarray[float]]:
+        skill_mult = sum(level * contribution for level,contribution in zip(skills, self.skill_contribution))
+        final_reward = self.base + self.skill_resources * skill_mult
+        # Negative reward = cost, if the player doesn't have enough. The action fails.
+        if any(-reward > current for reward,current in zip(final_reward, resources)): return (False, self.base * 0, self.skill_improvement * 0)
+
+class LandType:
+    def __init__(self, name: str, id: int, representation: str, color: str, move_cost: float, loot_table: LootTable):
+        self.name = name
+        self.id = id
+        self.representation = representation
+        self.color = color
+        self.move_cost = move_cost,
+        self.loot_table = loot_table
+
+land_info = [
+    LandType("Plains", LAND_PLAINS, colored("P", "black", "on_light_green"), "#44ff55", 0.1,
+        LootTable(
+            {RESOURCE_ENERGY: 0},{},{},{}
+        )
+    ),
+    LandType("Forest", LAND_FOREST, colored("F", "white", "on_green"), '#00bb00', 0.15,
+        LootTable(
+            {RESOURCE_ENERGY: -2, RESOURCE_WOOD: 1, RESOURCE_FRUIT: 1.5},
+            {RESOURCE_WOOD: 0.25, RESOURCE_FRUIT: 0.1}, # Every skill point grants an extra 0.25 wood and 0.1 fruit
+            {SKILL_CHOPPING: 1},   # Action affected by the chopping skill
+            {SKILL_CHOPPING: 0.25} # Level up 25% of chopping per chopping
+        )
+    ),
+    LandType("Mountain", LAND_MOUNTAIN, colored("M", "white", "on_grey"), "#333355", 0.7,
+        LootTable(
+            {RESOURCE_ENERGY: 5, RESOURCE_ORE: 1},
+            {RESOURCE_ORE: 0.4},
+            {SKILL_MINING: 1, SKILL_CRAFTING: 0.1},
+            {SKILL_MINING: 0.25}
+        )
+    ),
+    LandType("Water", LAND_WATER, colored("W", "white", "on_blue"), '#0000ff', 0.45,
+        LootTable(
+            {RESOURCE_ENERGY: -3, RESOURCE_RAW_FISH: 3},
+            {RESOURCE_RAW_FISH: 0.5},
+            {SKILL_FISHING: 1},
+            {SKILL_FISHING: 0.25}
+        )
+    )
+]
 
 rng = random.Random()
 
@@ -144,11 +211,24 @@ def print_map(land: np.ndarray[int]):
     sx, sy = land.shape
     for i in range(sx):
         for j in range(sy):
-            print(land_repr[land[i,j]], end="")
+            print(land_info[land[i,j]].representation, end="")
         print()
 
 def draw_map(land: np.ndarray[int], show = True) -> AxesImage:
-    cmap = colors.ListedColormap([land_colors[t] for t in land_types])
+    cmap = colors.ListedColormap([land_type.color for land_type in land_info])
+    img = plt.imshow(land, cmap=cmap)
+    if show: plt.show()
+    return img
+
+PLAYER_COLOR = "#cc22ff"
+ENEMY_COLOR = "#ff0000"
+def draw_world(land: np.ndarray[int], player: tuple[int,int], enemies: list[tuple[int,int]], show = True) -> AxesImage:
+    cmap = colors.ListedColormap([land_type.color for land_type in land_info] + [PLAYER_COLOR, ENEMY_COLOR])
+    playerFlag = len(land_info)
+    enemyFlag = player + 1
+    world = land.copy()
+    world[player] = playerFlag
+    for enemy in enemies: world[enemy] = enemyFlag
     img = plt.imshow(land, cmap=cmap)
     if show: plt.show()
     return img
