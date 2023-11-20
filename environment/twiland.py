@@ -36,6 +36,8 @@ skill_training_efficiency = {
     SKILL_COMBAT: 0
 }
 
+ENEMY_SPAWN_RANGE = (3, 6)
+
 def dict_to_array(dictionary: dict[int, float], size: int):
     result = np.zeros(size)
     for k,v in dictionary.items(): result[k] = v
@@ -232,3 +234,27 @@ def draw_world(land: np.ndarray[int], player: tuple[int,int], enemies: list[tupl
     img = plt.imshow(land, cmap=cmap)
     if show: plt.show()
     return img
+
+class Enemy:
+    def __init__(self, position: tuple[int,int], power: float = 1):
+        self.position = position
+        self.power = power
+
+class TwiLand:
+    def __init__(self, land: np.ndarray[int], player_position: tuple[int,int] | None = None):
+        self.land = land
+        if not player_position:
+            player_position = random_pos(land.shape)
+        self.player_position = player_position
+        self.enemies : list[Enemy] = []
+
+    def spawn_enemies(self, count: int = 1, power: float = 1):
+        for i in range(count):
+            angle = rng.random() * np.pi * 2
+            distance = rng.randint(*ENEMY_SPAWN_RANGE)
+            offset = (int(distance * np.sin(angle)) + int(distance * np.cos(angle)))
+            position = step(self.land.shape, self.player_position, offset)
+            self.enemies.append(Enemy(position, power))
+
+    def take_action(self, action: int):
+        pass

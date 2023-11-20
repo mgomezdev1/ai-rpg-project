@@ -1,7 +1,7 @@
 import numpy as np
 
 # Moving to adjacent edges
-from environment.twiland import LAND_PLAINS, LAND_FOREST, LAND_MOUNTAIN, LAND_WATER, SKILLSET
+from environment.twiland import SKILLSET
 
 ACTION_WAIT = 0
 ACTION_MOVE_RIGHT = 1
