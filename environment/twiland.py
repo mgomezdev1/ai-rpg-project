@@ -299,7 +299,7 @@ class Observation:
         self.flattened_data = np.concatenate([self.flat_neighbors, self.flat_enemies, self.sigmoid_time, self.sigmoid_skills], axis=0, dtype=np.float32)
 
     def configured_size() -> int:
-        return TwiLand(generate_map((3 * VIEW_DISTANCE, 3 * VIEW_DISTANCE))).get_observation().flattened_data.shape
+        return TwiLand(generate_map((3 * VIEW_DISTANCE, 3 * VIEW_DISTANCE))).get_observation().flattened_data.shape[0]
 
 class TwiLand(gymnasium.Env):
     def __init__(self, land: np.ndarray[int], player_position: tuple[int,int] | None = None, enable_rendering = True):
@@ -330,22 +330,19 @@ class TwiLand(gymnasium.Env):
         self.land = land
     def save_map(self):
         cmap = colors.ListedColormap([land_type.color for land_type in land_info])
-        print([land_type.color for land_type in land_info])
-        print(self.land)
-
         dir = os.path.dirname(self.map_img_path)
         if (not os.path.exists(dir)): os.makedirs(dir)
         plt.imsave(self.map_img_path, self.land, cmap=cmap)
 
     def get_observation(self):
         land_submatrix = crop_map_submatrix(self.land, self.player_position, VIEW_DISTANCE)
-        mask = get_mask((2 * VIEW_DISTANCE + 1, VIEW_NORM))
+        mask = get_mask(2 * VIEW_DISTANCE + 1, VIEW_NORM)
         enemy_matrix   = np.zeros(self.land.shape)
         for e in self.enemies:
             enemy_matrix[e.position] = 1
         enemy_submatrix = crop_map_submatrix(enemy_matrix, self.player_position, VIEW_DISTANCE)
 
-        return Observation(land_submatrix, enemy_submatrix, self.time, self.player_skills, mask)
+        return Observation(land_submatrix, enemy_submatrix, self.time, self.player_skills, self.resources, mask)
 
     def reset(self) -> tuple[Observation, dict]:
         self.player_position = random_pos(self.land.shape)
