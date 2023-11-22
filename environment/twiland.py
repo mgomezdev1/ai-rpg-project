@@ -1,10 +1,14 @@
 from matplotlib.image import AxesImage
 import numpy as np
+import scipy
 from termcolor import colored
+import gymnasium
 import random
-from typing import TypeVar
+from typing import Literal, TypeAlias, TypeVar
 from matplotlib import pyplot as plt
 from matplotlib import colors
+
+from actions import ACTIONSET_MOVE, ACTIONTYPE_MOVE, ACTIONTYPE_INTERACT, ACTIONTYPE_TRAIN, SKILL_CHOPPING, SKILL_COMBAT, SKILL_CRAFTING, SKILL_FISHING, SKILL_MINING, SKILLSET, parse_action, position_offsets
 
 TAU = np.pi * 2
 
@@ -21,13 +25,6 @@ RESOURCE_RAW_FISH = 4
 RESOURCE_COOKED_FISH = 5
 RESOURCESET = {RESOURCE_ENERGY, RESOURCE_WOOD, RESOURCE_ORE, RESOURCE_FRUIT, RESOURCE_RAW_FISH, RESOURCE_COOKED_FISH}
 
-SKILL_CHOPPING = 0
-SKILL_MINING = 1
-SKILL_FISHING = 2
-SKILL_CRAFTING = 3
-SKILL_COMBAT = 4
-SKILLSET = {SKILL_CHOPPING, SKILL_MINING, SKILL_FISHING, SKILL_CRAFTING, SKILL_COMBAT}
-
 skill_training_efficiency = {
     SKILL_CHOPPING: 1,
     SKILL_MINING: 1,
@@ -37,6 +34,10 @@ skill_training_efficiency = {
 }
 
 ENEMY_SPAWN_RANGE = (3, 6)
+VIEW_DISTANCE = 4
+NormType : TypeAlias = Literal["1", "2", "inf"] 
+VIEW_NORM : NormType = "1"
+LAND_COMPRESSION = False
 
 def dict_to_array(dictionary: dict[int, float], size: int):
     result = np.zeros(size)
@@ -235,18 +236,76 @@ def draw_world(land: np.ndarray[int], player: tuple[int,int], enemies: list[tupl
     if show: plt.show()
     return img
 
+def crop_map_submatrix(land: np.ndarray[int], center: tuple[int,int], radius: int) -> np.ndarray[int]:
+    cx, cy = center
+    size = 2 * radius + 1
+    return np.roll(land, (-cx + radius, -cy + radius))[:size,:size]
+
+def compute_mask(size: int, norm: NormType) -> np.ndarray[bool]:
+    center = size // 2
+    mask = np.ones((size, size))
+    if norm == "inf":
+        return mask
+    else:
+        dist1d = np.array([abs(i-center) for i in range(size)])
+        aux = np.stack(
+            [np.tile(dist1d.reshape(1,size), (size,1)),   
+             np.tile(dist1d.reshape(size,1), (1,size))],
+            axis=2   
+        )
+        if norm == "1":
+            dist2d : np.ndarray = np.sum(aux, axis=2)
+        elif norm == "2":
+            dist2d : np.ndarray = np.linalg.norm(aux, axis=2)
+        else:
+            raise ValueError(f"Invalid norm given: {norm}")
+        return (dist2d <= center) # Note that the "center" is the same as the radius
+    
+def get_mask(size: int, norm: NormType) -> np.ndarray[bool]:
+    if (size, norm) not in precomputed_masks:
+        precomputed_masks[(size, norm)] = compute_mask(size, norm)
+    return precomputed_masks[(size, norm)]
+            
+precomputed_masks: np.ndarray[tuple[int,NormType], np.ndarray[bool]] = dict()
+def crop_observation(submatrix: np.ndarray[int], norm: NormType, unknown_value : int = -1) -> np.ndarray[int]:
+    sx, sy = submatrix.shape
+    assert sx == sy
+    radius = sx // 2
+    if norm == "inf":
+        return submatrix
+    mask = get_mask(sx, norm)
+    result = np.ones((sx,sx)) * unknown_value
+    np.copyto(result, submatrix, where=mask)
+    return result
+
 class Enemy:
     def __init__(self, position: tuple[int,int], power: float = 1):
         self.position = position
         self.power = power
 
-class TwiLand:
+class Observation:
+    def __init__(self, neighbours: np.ndarray[int], enemies: np.ndarray[int], time: float, skills: np.ndarray[float], resources: np.ndarray[int], view_mask: np.ndarray[bool]):
+        self.flat_neighbors = np.extract(view_mask, neighbours)
+        self.flat_enemies   = np.extract(view_mask, enemies)
+        self.sigmoid_time   = scipy.special.expit(np.array([time]) / 20) * 2 - 1
+        self.sigmoid_skills = scipy.special.expit(skills / 5) * 2 - 1
+        self.sigmoid_resources = scipy.special.expit(resources / 5) * 2 - 1
+        self.flattened_data = np.concatenate([self.flat_neighbors, self.flat_enemies, self.sigmoid_time, self.sigmoid_skills], axis=0, dtype=np.float32)
+
+    def configured_size() -> int:
+        return TwiLand(generate_map((3 * VIEW_DISTANCE, 3 * VIEW_DISTANCE))).get_observation().flattened_data.shape
+
+class TwiLand(gymnasium.Env):
     def __init__(self, land: np.ndarray[int], player_position: tuple[int,int] | None = None):
         self.land = land
         if not player_position:
             player_position = random_pos(land.shape)
         self.player_position = player_position
         self.enemies : list[Enemy] = []
+
+        self.player_skills = np.ones(len(SKILLSET))
+        self.resources = np.ones(len(RESOURCESET))
+        self.time = 0
 
     def spawn_enemies(self, count: int = 1, power: float = 1):
         for i in range(count):
@@ -256,5 +315,29 @@ class TwiLand:
             position = step(self.land.shape, self.player_position, offset)
             self.enemies.append(Enemy(position, power))
 
-    def take_action(self, action: int):
-        pass
+    def set_map(self, land: np.ndarray[int]):
+        self.land = land
+
+    def get_observation(self):
+        land_submatrix = crop_map_submatrix(self.land, self.player_position, VIEW_DISTANCE)
+        mask = get_mask((2 * VIEW_DISTANCE + 1, VIEW_NORM))
+        enemy_matrix   = np.zeros(self.land.shape)
+        for e in self.enemies:
+            enemy_matrix[e.position] = 1
+        enemy_submatrix = crop_map_submatrix(enemy_matrix, self.player_position, VIEW_DISTANCE)
+
+        return Observation(land_submatrix, enemy_submatrix, self.time, self.player_skills, mask)
+
+    def reset(self) -> tuple[Observation, dict]:
+        self.player_position = random_pos(self.land.shape)
+        self.time = 0
+        self.player_skills = np.ones(len(SKILLSET))
+        self.resources = np.ones(len(RESOURCESET))
+        self.enemies = []
+
+        return (self.get_observation(), {})
+
+    def step(self, action: int) -> tuple[Observation, float, bool, bool, dict]:
+        act_type, data = parse_action(action)
+        if act_type == ACTIONTYPE_MOVE:
+            offset = position_offsets[data]
