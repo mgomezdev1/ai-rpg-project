@@ -1,3 +1,4 @@
+import os
 from matplotlib.image import AxesImage
 import numpy as np
 import scipy
@@ -9,6 +10,7 @@ from matplotlib import pyplot as plt
 from matplotlib import colors
 
 from actions import ACTIONSET_MOVE, ACTIONTYPE_MOVE, ACTIONTYPE_INTERACT, ACTIONTYPE_TRAIN, SKILL_CHOPPING, SKILL_COMBAT, SKILL_CRAFTING, SKILL_FISHING, SKILL_MINING, SKILLSET, parse_action, position_offsets
+import rendering
 
 TAU = np.pi * 2
 
@@ -225,14 +227,18 @@ def draw_map(land: np.ndarray[int], show = True) -> AxesImage:
 
 PLAYER_COLOR = "#cc22ff"
 ENEMY_COLOR = "#ff0000"
-def draw_world(land: np.ndarray[int], player: tuple[int,int], enemies: list[tuple[int,int]], show = True) -> AxesImage:
-    cmap = colors.ListedColormap([land_type.color for land_type in land_info] + [PLAYER_COLOR, ENEMY_COLOR])
+def build_world_matrix(land: np.ndarray[int], player: tuple[int,int], enemies: list[tuple[int,int]]) -> np.ndarray:
     playerFlag = len(land_info)
-    enemyFlag = player + 1
+    enemyFlag = playerFlag + 1
     world = land.copy()
     world[player] = playerFlag
     for enemy in enemies: world[enemy] = enemyFlag
-    img = plt.imshow(land, cmap=cmap)
+    return world
+
+def draw_world(land: np.ndarray[int], player: tuple[int,int], enemies: list[tuple[int,int]], show = True) -> AxesImage:
+    cmap = colors.ListedColormap([land_type.color for land_type in land_info] + [PLAYER_COLOR, ENEMY_COLOR])
+    world = build_world_matrix(land, player, enemies)
+    img = plt.imshow(world, cmap=cmap)
     if show: plt.show()
     return img
 
@@ -296,7 +302,7 @@ class Observation:
         return TwiLand(generate_map((3 * VIEW_DISTANCE, 3 * VIEW_DISTANCE))).get_observation().flattened_data.shape
 
 class TwiLand(gymnasium.Env):
-    def __init__(self, land: np.ndarray[int], player_position: tuple[int,int] | None = None):
+    def __init__(self, land: np.ndarray[int], player_position: tuple[int,int] | None = None, enable_rendering = True):
         self.land = land
         if not player_position:
             player_position = random_pos(land.shape)
@@ -306,6 +312,11 @@ class TwiLand(gymnasium.Env):
         self.player_skills = np.ones(len(SKILLSET))
         self.resources = np.ones(len(RESOURCESET))
         self.time = 0
+        self.map_img_path = "./temp/img/twiland_map.png"
+        self.enable_rendering = enable_rendering
+        if enable_rendering:
+            rendering.enable_rendering()
+            self.save_map()
 
     def spawn_enemies(self, count: int = 1, power: float = 1):
         for i in range(count):
@@ -317,6 +328,14 @@ class TwiLand(gymnasium.Env):
 
     def set_map(self, land: np.ndarray[int]):
         self.land = land
+    def save_map(self):
+        cmap = colors.ListedColormap([land_type.color for land_type in land_info])
+        print([land_type.color for land_type in land_info])
+        print(self.land)
+
+        dir = os.path.dirname(self.map_img_path)
+        if (not os.path.exists(dir)): os.makedirs(dir)
+        plt.imsave(self.map_img_path, self.land, cmap=cmap)
 
     def get_observation(self):
         land_submatrix = crop_map_submatrix(self.land, self.player_position, VIEW_DISTANCE)
@@ -341,3 +360,14 @@ class TwiLand(gymnasium.Env):
         act_type, data = parse_action(action)
         if act_type == ACTIONTYPE_MOVE:
             offset = position_offsets[data]
+
+    def render(self):
+        # May or may not get implemented
+        pass
+
+    def close(self):
+        pass
+
+# TESTING
+if __name__ == "__main__":
+    TwiLand(generate_map((50,50)))
