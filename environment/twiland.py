@@ -5,6 +5,7 @@ import scipy
 from termcolor import colored
 import gymnasium
 import random
+import torch.nn as nn
 from typing import Literal, TypeAlias, TypeVar
 from matplotlib import pyplot as plt
 from matplotlib import colors
@@ -40,6 +41,7 @@ VIEW_DISTANCE = 4
 NormType : TypeAlias = Literal["1", "2", "inf"] 
 VIEW_NORM : NormType = "1"
 LAND_COMPRESSION = False
+DEFAULT_MAP_SIZE = 50
 
 def dict_to_array(dictionary: dict[int, float], size: int):
     result = np.zeros(size)
@@ -296,6 +298,7 @@ class Observation:
         self.sigmoid_time   = scipy.special.expit(np.array([time]) / 20) * 2 - 1
         self.sigmoid_skills = scipy.special.expit(skills / 5) * 2 - 1
         self.sigmoid_resources = scipy.special.expit(resources / 5) * 2 - 1
+        # Not sure if we want to include sigmoid_resources in flattened data
         self.flattened_data = np.concatenate([self.flat_neighbors, self.flat_enemies, self.sigmoid_time, self.sigmoid_skills], axis=0, dtype=np.float32)
 
     def configured_size() -> int:
@@ -328,6 +331,7 @@ class TwiLand(gymnasium.Env):
 
     def set_map(self, land: np.ndarray[int]):
         self.land = land
+        
     def save_map(self):
         cmap = colors.ListedColormap([land_type.color for land_type in land_info])
         dir = os.path.dirname(self.map_img_path)
@@ -363,6 +367,42 @@ class TwiLand(gymnasium.Env):
         pass
 
     def close(self):
+        pass
+
+class AgentNet(nn.Module):
+    # I just kinda chose most of the numbers, we can play around with node amounts and add or remove layers
+    def __init__(self):
+        super(AgentNet, self).__init__()
+        # Input size based on number of outputs from Observation, not sure if thats the right amount
+        self.fc1 = nn.Linear(2 * VIEW_DISTANCE + 12, 32)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(32, 20)
+        self.relu2 = nn.ReLU()
+        # Output size based on number of actions, couldn't find constant of how many actions exist, probably don't need one, just update if more actions
+        self.fc3 = nn.Linear(20, 11)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        x = self.relu2(x)
+        x = self.fc3(x)
+        return x
+    
+class Agent:
+    def __init__(self, game: TwiLand | None = None, map_size: int | None = None):
+        self.net = AgentNet()
+
+        if game is not None:
+            self.game = game
+
+        if map_size == None:
+            self.game = TwiLand(generate_map(DEFAULT_MAP_SIZE, DEFAULT_MAP_SIZE))
+        elif game is None:
+            self.game = TwiLand(generate_map(map_size, map_size))
+
+    def learn(self):
+        # Trains the nn based on the 
         pass
 
 # TESTING
