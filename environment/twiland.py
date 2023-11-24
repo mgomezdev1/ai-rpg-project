@@ -435,15 +435,15 @@ class TwiLand(gymnasium.Env):
 
         return (self.get_observation(), self.info)
 
-    def _move_enemies(self, target: tuple[int,int]) -> tuple[int, bool]:
+    def _check_enemy_attacks(self, allow_move: bool = True) -> tuple[int, bool]:
         '''
-            Moves enemies and forces them to fight if they reach the player
+            May move enemies and forces them to fight if they reach the player or the player reached them
 
             Returns the number of fights the player fought and a boolean representing whether the player survived the enemy's turn.
         '''
         num_fights = 0
         for e in self.enemies:
-            if e.seek(target, self.land.shape):
+            if (e.seek(self.player_position, self.land.shape) if allow_move else e.position == self.player_position):
                 success, new_r, new_s = e.fight().craft(self.resources, self.player_skills)
                 if not success:
                     return num_fights, False
@@ -472,7 +472,7 @@ class TwiLand(gymnasium.Env):
             self.tstep = 0
         if self.tstep >= self.actions_per_day:
             # Enemies only move during the night...
-            fights, survived = self._move_enemies(self.player_position)
+            fights, survived = self._check_enemy_attacks(allow_move=True)
             if not survived:
                 return self._death()
             partial_reward += fights * self.fight_reward
@@ -493,7 +493,10 @@ class TwiLand(gymnasium.Env):
                 return self._fail()
             self.player_position = target_square
             self.resources[RESOURCE_ENERGY] -= move_cost
-            return self._environment_turn()
+            victories, survived = self._check_enemy_attacks(allow_move=False)
+            if not survived:
+                return self._death()
+            return self._environment_turn(victories * self.fight_reward)
         elif act_type == ACTIONTYPE_INTERACT:
             offset = position_offsets[data]
             target_square = step(self.land.shape, self.player_position, offset)
@@ -519,42 +522,6 @@ class TwiLand(gymnasium.Env):
         pass
 
     def close(self):
-        pass
-
-class AgentNet(nn.Module):
-    # I just kinda chose most of the numbers, we can play around with node amounts and add or remove layers
-    def __init__(self):
-        super(AgentNet, self).__init__()
-        # Input size based on number of outputs from Observation
-        self.fc1 = nn.Linear(Observation.configured_size(), 32)
-        self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(32, 20)
-        self.relu2 = nn.ReLU()
-        # Output size based on number of actions, couldn't find constant of how many actions exist, probably don't need one, just update if more actions
-        self.fc3 = nn.Linear(20, len(ACTIONSET_ALL))
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.fc2(x)
-        x = self.relu2(x)
-        x = self.fc3(x)
-        return x
-    
-class Agent:
-    def __init__(self, game: TwiLand | None = None, map_size: int | None = None):
-        self.net = AgentNet()
-
-        if game is not None:
-            self.game = game
-
-        if map_size == None:
-            self.game = TwiLand(generate_map(DEFAULT_MAP_SIZE, DEFAULT_MAP_SIZE))
-        elif game is None:
-            self.game = TwiLand(generate_map(map_size, map_size))
-
-    def learn(self):
-        # Trains the nn based on the 
         pass
 
 # TESTING
