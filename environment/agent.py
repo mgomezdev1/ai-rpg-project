@@ -1,16 +1,18 @@
 import torch.nn as nn
 import torch.optim as optim
 import torch
+import tqdm
 
 #from actions import ACTIONSET_MOVE, ACTIONTYPE_MOVE, ACTIONTYPE_INTERACT, ACTIONTYPE_TRAIN, SKILL_CHOPPING, SKILL_COMBAT, SKILL_CRAFTING, SKILL_FISHING, SKILL_MINING, SKILLSET, parse_action, position_offsets
-from twiland import VIEW_DISTANCE, DEFAULT_MAP_SIZE, TwiLand, generate_map
+from twiland import VIEW_DISTANCE, DEFAULT_MAP_SIZE, Observation, TwiLand, generate_map
 
 class AgentNet(nn.Module):
     # I just kinda chose most of the numbers, we can play around with node amounts and add or remove layers
     def __init__(self):
         super(AgentNet, self).__init__()
-        # Input size based on number of outputs from Observation, not sure if thats the right amount
-        self.fc1 = nn.Linear(2 * VIEW_DISTANCE + 12, 32)
+        # Input size based on number of outputs from Observation
+        # This can be obtained from Observation.configured_size()
+        self.fc1 = nn.Linear(Observation.configured_size(), 32)
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(32, 20)
         self.relu2 = nn.ReLU()
@@ -46,11 +48,15 @@ class Agent:
     def learn(self, lr: float = 0.01, epochs: int = 100):
         optimizer = optim.Adam(self.net.parameters(), lr=lr)
         criterion = nn.CrossEntropyLoss()
-        for epoch in range(epochs): 
+        for epoch in tqdm(range(epochs)): 
             total_reward = 0
 
+            # generates a new map if necessary
+            if self.generate_new:
+                self.env.set_map(generate_map((self.map_size, self.map_size)))
+
             game_finished = False
-            observation = self.env.get_observation()
+            observation, _ = self.env.reset()
             while not game_finished:
 
                 # Definitely doesn't work, I need to figure out what the flattened data looks like
@@ -60,7 +66,9 @@ class Agent:
                 action = torch.multinomial(action_prob, 1).item()
 
                 # Take the decided action
-                observation, reward, game_finished, truncated, info  = self.env.step(action)
+                observation, reward, terminal, truncated, info  = self.env.step(action)
+                game_finished = terminal or truncated
+
                 total_reward += reward
 
                 # compute the loss
@@ -74,12 +82,7 @@ class Agent:
 
                 # No back pass, not sure how we want to implement it
 
-            # Resets the map or generates a new map
-            if self.generate_new:
-                self.env = TwiLand(generate_map(self.map_size, self.map_size))
-            else:
-                self.env.reset()
-
+    
     def play(self, game: TwiLand):
         # Plays the game with the given gameboard to termination
         total_reward = 0

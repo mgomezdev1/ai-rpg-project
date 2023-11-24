@@ -1,7 +1,7 @@
 import numpy as np
-from environment.recipes import RECIPESET
+from recipes import RECIPESET
 
-from environment.utils import RESOURCE_COOKED_FISH, RESOURCE_ENERGY, RESOURCE_RAW_FISH, RESOURCE_WOOD, SKILLSET, Recipe
+from utils import RESOURCE_COOKED_FISH, RESOURCE_ENERGY, RESOURCE_RAW_FISH, RESOURCE_WOOD, SKILLSET, Recipe
 
 # Moving to adjacent edges
 ACTION_WAIT = 0

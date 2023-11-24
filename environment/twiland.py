@@ -13,7 +13,6 @@ from matplotlib import colors
 from actions import ACTIONSET_ALL, ACTIONTYPE_MOVE, ACTIONTYPE_INTERACT, ACTIONTYPE_CRAFT, parse_action, position_offsets
 from recipes import ORDERED_RECIPES
 from utils import *
-import rendering
 
 TAU = np.pi * 2
 
@@ -177,7 +176,7 @@ def generate_map(size: tuple[int,int], **kwargs) -> np.ndarray[int]:
     Size/Length ranges are a tuple (min,max), inclusive, for the random range to use for blob radii and random path lengths.
     """
     # Cover the entire area in plains
-    result = np.ones(size) * LAND_PLAINS
+    result = np.ones(size, dtype=int) * LAND_PLAINS
     
     lake_count = kwargs.get("lake_count", int(size[0] * size[1] / 200))
     lake_volatility = kwargs.get("lake_volatility", 2.5)
@@ -312,7 +311,7 @@ class Enemy:
             dx -= sx
         elif dx < -sx / 2: # Too far 
             dx += sx
-        if dy > dy / 2: # Too far down, better to wrap on the bottom edge
+        if dy > sy / 2: # Too far down, better to wrap on the bottom edge
             dy -= sy
         elif dy < -sy / 2: # Too far up, better to wrap on the top edge
             dy += sy
@@ -359,7 +358,7 @@ class Observation:
         self.flattened_data = np.concatenate([self.flat_neighbors, self.flat_enemies, self.sigmoid_time, self.sigmoid_skills], axis=0, dtype=np.float32)
 
     def configured_size() -> int:
-        return TwiLand(generate_map((3 * VIEW_DISTANCE, 3 * VIEW_DISTANCE))).get_observation().flattened_data.shape[0]
+        return TwiLand(generate_map((3 * VIEW_DISTANCE, 3 * VIEW_DISTANCE)), enable_rendering=False).get_observation().flattened_data.shape[0]
 
 class TwiLand(gymnasium.Env):
     def __init__(self, land: np.ndarray[int], player_position: tuple[int,int] | None = None, enable_rendering = True, 
@@ -386,26 +385,34 @@ class TwiLand(gymnasium.Env):
         self.urvival_reward = survival_reward
         self.max_days = max_days
         self.idle_cost = idle_cost
+
+        # variables for reset
+        self.starting_energy = starting_energy
+
         self.info = {}
         if enable_rendering:
-            rendering.enable_rendering()
+            import rendering
             self.save_map()
+            rendering.enable_rendering()
 
     def spawn_enemies(self, count: int = 1, power: float = 1):
         for i in range(count):
             angle = rng.random() * np.pi * 2
             distance = rng.randint(*ENEMY_SPAWN_RANGE)
-            offset = (int(distance * np.sin(angle)) + int(distance * np.cos(angle)))
+            offset = (int(distance * np.sin(angle)), int(distance * np.cos(angle)))
             position = step(self.land.shape, self.player_position, offset)
             self.enemies.append(Enemy(position, power))
 
     def set_map(self, land: np.ndarray[int]):
         self.land = land
+        if self.enable_rendering:
+            self.save_map()
         
     def save_map(self):
         cmap = colors.ListedColormap([land_type.color for land_type in land_info])
         dir = os.path.dirname(self.map_img_path)
         if (not os.path.exists(dir)): os.makedirs(dir)
+        print(self.land.shape)
         plt.imsave(self.map_img_path, self.land, cmap=cmap)
 
     def get_observation(self):
@@ -421,8 +428,9 @@ class TwiLand(gymnasium.Env):
     def reset(self) -> tuple[Observation, dict]:
         self.player_position = random_pos(self.land.shape)
         self.time = 0
+        self.tstep = 0
         self.player_skills = np.ones(len(SKILLSET))
-        self.resources = np.ones(len(RESOURCESET))
+        self.resources = dict_to_array({RESOURCE_ENERGY: self.starting_energy}, len(RESOURCESET))
         self.enemies = []
 
         return (self.get_observation(), self.info)
@@ -445,10 +453,10 @@ class TwiLand(gymnasium.Env):
         return num_fights, True
 
     def _fail(self) -> tuple[Observation, float, bool, bool, dict]:
-        return self._environment_turn(self, self.fail_reward)
+        return self._environment_turn(self.fail_reward)
 
     def _death(self) -> tuple[Observation, float, bool, bool, dict]:
-        return self.get_observation(), -1000, True, False, self.info()
+        return self.get_observation(), -1000, True, False, self.info
 
     def _environment_turn(self, partial_reward = 0) -> tuple[Observation, float, bool, bool, dict]:
         self.tstep += 1
@@ -470,7 +478,7 @@ class TwiLand(gymnasium.Env):
             if rng.random() < prob:
                 self.spawn_enemies(1, self.time)
 
-        return self.get_observation(), partial_reward, False, False, self.info()
+        return self.get_observation(), partial_reward, False, False, self.info
 
     def step(self, action: int) -> tuple[Observation, float, bool, bool, dict]:
         act_type, data = parse_action(action)
@@ -549,3 +557,4 @@ class Agent:
 # TESTING
 if __name__ == "__main__":
     TwiLand(generate_map((50,50)))
+    print(Observation.configured_size())
