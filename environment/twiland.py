@@ -10,7 +10,9 @@ from typing import Literal, TypeAlias, TypeVar
 from matplotlib import pyplot as plt
 from matplotlib import colors
 
-from actions import ACTIONSET_MOVE, ACTIONTYPE_MOVE, ACTIONTYPE_INTERACT, ACTIONTYPE_TRAIN, SKILL_CHOPPING, SKILL_COMBAT, SKILL_CRAFTING, SKILL_FISHING, SKILL_MINING, SKILLSET, parse_action, position_offsets
+from actions import ACTIONSET_ALL, ACTIONTYPE_MOVE, ACTIONTYPE_INTERACT, ACTIONTYPE_CRAFT, parse_action, position_offsets
+from recipes import ORDERED_RECIPES
+from utils import *
 import rendering
 
 TAU = np.pi * 2
@@ -19,14 +21,6 @@ LAND_PLAINS = 0
 LAND_FOREST = 1
 LAND_MOUNTAIN = 2
 LAND_WATER = 3
-
-RESOURCE_ENERGY = 0
-RESOURCE_WOOD = 1
-RESOURCE_ORE = 2
-RESOURCE_FRUIT = 3
-RESOURCE_RAW_FISH = 4
-RESOURCE_COOKED_FISH = 5
-RESOURCESET = {RESOURCE_ENERGY, RESOURCE_WOOD, RESOURCE_ORE, RESOURCE_FRUIT, RESOURCE_RAW_FISH, RESOURCE_COOKED_FISH}
 
 skill_training_efficiency = {
     SKILL_CHOPPING: 1,
@@ -43,60 +37,76 @@ VIEW_NORM : NormType = "1"
 LAND_COMPRESSION = False
 DEFAULT_MAP_SIZE = 50
 
-def dict_to_array(dictionary: dict[int, float], size: int):
-    result = np.zeros(size)
-    for k,v in dictionary.items(): result[k] = v
-    return result
-
-class LootTable:
-    def __init__(self, base: dict[int, float], skill_resources: dict[int, float], skill_contribution: dict[int, float], skill_improvement: dict[int, float]):
-        self.base = dict_to_array(base, len(RESOURCESET))
-        self.skill_resources = dict_to_array(skill_resources, len(RESOURCESET))
-        self.skill_contribution = dict_to_array(skill_contribution, len(SKILLSET))
-        self.skill_improvement = dict_to_array(skill_improvement, len(SKILLSET))
-    def roll(self, resources: np.ndarray[float], skills: np.ndarray[float]) -> tuple[bool, np.ndarray[float], np.ndarray[float]]:
-        skill_mult = sum(level * contribution for level,contribution in zip(skills, self.skill_contribution))
-        final_reward = self.base + self.skill_resources * skill_mult
-        # Negative reward = cost, if the player doesn't have enough. The action fails.
-        if any(-reward > current for reward,current in zip(final_reward, resources)): return (False, self.base * 0, self.skill_improvement * 0)
-
 class LandType:
-    def __init__(self, name: str, id: int, representation: str, color: str, move_cost: float, loot_table: LootTable):
+    def __init__(self, name: str, id: int, representation: str, color: str, move_cost: float, harvest: Recipe):
         self.name = name
         self.id = id
         self.representation = representation
         self.color = color
         self.move_cost = move_cost,
-        self.loot_table = loot_table
+        self.harvest = harvest
 
 land_info = [
     LandType("Plains", LAND_PLAINS, colored("P", "black", "on_light_green"), "#44ff55", 0.1,
-        LootTable(
-            {RESOURCE_ENERGY: 0},{},{},{}
+        Recipe(
+            {RESOURCE_ENERGY: 1} # Wastes one energy
         )
     ),
     LandType("Forest", LAND_FOREST, colored("F", "white", "on_green"), '#00bb00', 0.15,
-        LootTable(
-            {RESOURCE_ENERGY: -2, RESOURCE_WOOD: 1, RESOURCE_FRUIT: 1.5},
-            {RESOURCE_WOOD: 0.25, RESOURCE_FRUIT: 0.1}, # Every skill point grants an extra 0.25 wood and 0.1 fruit
-            {SKILL_CHOPPING: 1},   # Action affected by the chopping skill
-            {SKILL_CHOPPING: 0.25} # Level up 25% of chopping per chopping
+        RecipeStack(
+            Recipe(
+                {RESOURCE_ENERGY: 1.5, RESOURCE_AXE: 1}, 
+                {RESOURCE_WOOD: 3, RESOURCE_FRUIT: 2, RESOURCE_AXE: 0.75}, # Base 25% chance of breaking the tool
+                {SKILL_CHOPPING: 1}, # Action affected by the chopping skill
+                {RESOURCE_WOOD: 0.5, RESOURCE_FRUIT: 0.2, RESOURCE_AXE: 0.02}, # Every skill point grants a cumulative 2% chance of not consuming the axe
+                {SKILL_CHOPPING: 0.35}, 
+                {RESOURCE_AXE: 0.95} # At least, 5% chance of breaking the axe
+            ),
+            Recipe(
+                {RESOURCE_ENERGY: 2}, 
+                {RESOURCE_WOOD: 1, RESOURCE_FRUIT: 1.5},
+                {SKILL_CHOPPING: 1}, # Action affected by the chopping skill
+                {RESOURCE_WOOD: 0.25, RESOURCE_FRUIT: 0.1}, # Every skill point grants an extra 0.25 wood and 0.1 fruit
+                {SKILL_CHOPPING: 0.25} # Level up 25% of chopping per chopping
+            )
         )
     ),
     LandType("Mountain", LAND_MOUNTAIN, colored("M", "white", "on_grey"), "#333355", 0.7,
-        LootTable(
-            {RESOURCE_ENERGY: 5, RESOURCE_ORE: 1},
-            {RESOURCE_ORE: 0.4},
-            {SKILL_MINING: 1, SKILL_CRAFTING: 0.1},
-            {SKILL_MINING: 0.25}
+        RecipeStack (
+            Recipe(
+                {RESOURCE_ENERGY: 1.5, RESOURCE_PICKAXE: 1}, 
+                {RESOURCE_ORE: 2, RESOURCE_PICKAXE: 0.75}, # Base 25% chance of breaking the tool
+                {SKILL_MINING: 1},
+                {RESOURCE_ORE: 0.65, RESOURCE_PICKAXE: 0.02}, # Every skill point grants a cumulative 2% chance of not consuming the tool
+                {SKILL_MINING: 0.5}, 
+                {RESOURCE_AXE: 0.95} # At least, 5% chance of breaking the tool
+            ),
+            Recipe(
+                {RESOURCE_ENERGY: 6}, 
+                {RESOURCE_ORE: 1},
+                {SKILL_MINING: 1}, # Action affected by the mining skill
+                {RESOURCE_ORE: 0.25},
+                {SKILL_MINING: 0.25}
+            )
         )
     ),
     LandType("Water", LAND_WATER, colored("W", "white", "on_blue"), '#0000ff', 0.45,
-        LootTable(
-            {RESOURCE_ENERGY: -3, RESOURCE_RAW_FISH: 3},
-            {RESOURCE_RAW_FISH: 0.5},
-            {SKILL_FISHING: 1},
-            {SKILL_FISHING: 0.25}
+        RecipeStack (
+            Recipe(
+                {RESOURCE_ENERGY: 2.5, RESOURCE_FISHING_ROD: 1}, 
+                {RESOURCE_RAW_FISH: 2, RESOURCE_FISHING_ROD: 0.75}, # Base 25% chance of breaking the tool
+                {SKILL_FISHING: 1},
+                {RESOURCE_RAW_FISH: 0.65, RESOURCE_FISHING_ROD: 0.02}, # Every skill point grants a cumulative 2% chance of not consuming the tool
+                {SKILL_FISHING: 0.6}, 
+                {RESOURCE_FISHING_ROD: 0.95} # At least, 5% chance of breaking the tool
+            ),
+            Recipe(
+                {RESOURCE_ENERGY: 5}, 
+                {RESOURCE_RAW_FISH: 1},
+                {SKILL_FISHING: 1}, # Action affected by the mining skill
+                {RESOURCE_RAW_FISH: 0.2},
+                {SKILL_FISHING: 0.25}
+            )
         )
     )
 ]
@@ -278,7 +288,6 @@ precomputed_masks: np.ndarray[tuple[int,NormType], np.ndarray[bool]] = dict()
 def crop_observation(submatrix: np.ndarray[int], norm: NormType, unknown_value : int = -1) -> np.ndarray[int]:
     sx, sy = submatrix.shape
     assert sx == sy
-    radius = sx // 2
     if norm == "inf":
         return submatrix
     mask = get_mask(sx, norm)
@@ -291,13 +300,61 @@ class Enemy:
         self.position = position
         self.power = power
 
+    def seek(self, target: tuple[int,int], land_size: tuple[int,int]) -> bool:
+        if target == self.position:
+            return True
+        x,y = self.position
+        tx,ty = target
+        sx,sy = land_size
+        dx = tx - x
+        dy = ty - y
+        if dx > sx / 2:
+            dx -= sx
+        elif dx < -sx / 2: # Too far 
+            dx += sx
+        if dy > dy / 2: # Too far down, better to wrap on the bottom edge
+            dy -= sy
+        elif dy < -sy / 2: # Too far up, better to wrap on the top edge
+            dy += sy
+        final_step = (np.sign(dx),0) if abs(dx) > abs(dy) else (0,np.sign(dy))
+        self.position = step(land_size, self.position, final_step)
+        return self.position == target
+    
+    def fight(self) -> Recipe:
+        return RecipeStack(
+            Recipe( # FIGHT WITH A SWORD
+                {RESOURCE_ENERGY: self.power * 0.5, RESOURCE_SWORD: 1},
+                {RESOURCE_SWORD: 0.5}, # Base 50% chance of keeping the sword
+                {SKILL_COMBAT: 1, SKILL_CRAFTING: 0.2}, # Being 'crafty' can help!
+                {RESOURCE_ENERGY: 0.5, RESOURCE_SWORD: 0.025}, # 2.5% extra chance of keeping the sword per combat level (and 5 crafting levels)
+                {SKILL_COMBAT: 0.25},
+                {RESOURCE_ENERGY: self.power * 0.5, RESOURCE_SWORD: 0.99} # Can't regain energy, at least a 1% chance of losing sword
+            ),
+            Recipe( # NO SWORD? FIGHT THE MONSTER WITH AN AXE!
+                {RESOURCE_ENERGY: self.power * 0.75, RESOURCE_AXE: 1},
+                {RESOURCE_AXE: 0.25}, # Pretty high chance of destroying the axe
+                {SKILL_COMBAT: 0.5, SKILL_CHOPPING: 0.5}, # Helped by chopping skill
+                {RESOURCE_ENERGY: 0.35, RESOURCE_AXE: 0.05}, # Use less energy and keep axe with better skill
+                {SKILL_COMBAT: 0.25, SKILL_CHOPPING: 0.1},
+                {RESOURCE_ENERGY: self.power * 0.75, RESOURCE_AXE: 0.98}
+            ),
+            Recipe( # FIGHT BARE-HANDED (not a great idea)
+                {RESOURCE_ENERGY: self.power * 1.5},
+                {}, # No rewards
+                {SKILL_COMBAT: 1},
+                {RESOURCE_ENERGY: 0.25}, # Use less energy the better one is at combat
+                {SKILL_COMBAT: 1}, # Hard to fight without tools: guaranteed level up in combat!
+                {RESOURCE_ENERGY: self.power * 1.5}
+            )
+        )
+
 class Observation:
     def __init__(self, neighbours: np.ndarray[int], enemies: np.ndarray[int], time: float, skills: np.ndarray[float], resources: np.ndarray[int], view_mask: np.ndarray[bool]):
         self.flat_neighbors = np.extract(view_mask, neighbours)
         self.flat_enemies   = np.extract(view_mask, enemies)
-        self.sigmoid_time   = scipy.special.expit(np.array([time]) / 20) * 2 - 1
-        self.sigmoid_skills = scipy.special.expit(skills / 5) * 2 - 1
-        self.sigmoid_resources = scipy.special.expit(resources / 5) * 2 - 1
+        self.sigmoid_time   = scipy.special.expit(np.array([time / 5 - 1, ((time % 1) - 0.5) * 10]))
+        self.sigmoid_skills = scipy.special.expit(skills / 5 - 1)
+        self.sigmoid_resources = scipy.special.expit(resources / 5 - 1)
         # Not sure if we want to include sigmoid_resources in flattened data
         self.flattened_data = np.concatenate([self.flat_neighbors, self.flat_enemies, self.sigmoid_time, self.sigmoid_skills], axis=0, dtype=np.float32)
 
@@ -305,7 +362,9 @@ class Observation:
         return TwiLand(generate_map((3 * VIEW_DISTANCE, 3 * VIEW_DISTANCE))).get_observation().flattened_data.shape[0]
 
 class TwiLand(gymnasium.Env):
-    def __init__(self, land: np.ndarray[int], player_position: tuple[int,int] | None = None, enable_rendering = True):
+    def __init__(self, land: np.ndarray[int], player_position: tuple[int,int] | None = None, enable_rendering = True, 
+            fail_reward: float = -1, fight_reward: float = 50, craft_reward: float = 20, harvest_reward: float = 5, survival_reward: float = 1,
+            max_days: float = 10, starting_energy: int = 10, actions_per_day: int = 10, actions_per_night: int = 5, idle_cost: float = 0.1):
         self.land = land
         if not player_position:
             player_position = random_pos(land.shape)
@@ -313,10 +372,21 @@ class TwiLand(gymnasium.Env):
         self.enemies : list[Enemy] = []
 
         self.player_skills = np.ones(len(SKILLSET))
-        self.resources = np.ones(len(RESOURCESET))
-        self.time = 0
+        self.resources = dict_to_array({RESOURCE_ENERGY: starting_energy}, len(RESOURCESET))
+        self.time: float = 0
+        self.tstep: int = 0 
+        self.actions_per_day = actions_per_day
+        self.actions_per_night = actions_per_night
         self.map_img_path = "./temp/img/twiland_map.png"
         self.enable_rendering = enable_rendering
+        self.fail_reward = fail_reward
+        self.fight_reward = fight_reward
+        self.craft_reward = craft_reward
+        self.harvest_reward = harvest_reward
+        self.urvival_reward = survival_reward
+        self.max_days = max_days
+        self.idle_cost = idle_cost
+        self.info = {}
         if enable_rendering:
             rendering.enable_rendering()
             self.save_map()
@@ -355,12 +425,83 @@ class TwiLand(gymnasium.Env):
         self.resources = np.ones(len(RESOURCESET))
         self.enemies = []
 
-        return (self.get_observation(), {})
+        return (self.get_observation(), self.info)
+
+    def _move_enemies(self, target: tuple[int,int]) -> tuple[int, bool]:
+        '''
+            Moves enemies and forces them to fight if they reach the player
+
+            Returns the number of fights the player fought and a boolean representing whether the player survived the enemy's turn.
+        '''
+        num_fights = 0
+        for e in self.enemies:
+            if e.seek(target, self.land.shape):
+                success, new_r, new_s = e.fight().craft(self.resources, self.player_skills)
+                if not success:
+                    return num_fights, False
+                self.resources = new_r
+                self.player_skills = new_s
+                num_fights += 1
+        return num_fights, True
+
+    def _fail(self) -> tuple[Observation, float, bool, bool, dict]:
+        return self._environment_turn(self, self.fail_reward)
+
+    def _death(self) -> tuple[Observation, float, bool, bool, dict]:
+        return self.get_observation(), -1000, True, False, self.info()
+
+    def _environment_turn(self, partial_reward = 0) -> tuple[Observation, float, bool, bool, dict]:
+        self.tstep += 1
+        self.time += 1 / (self.actions_per_day + self.actions_per_night)
+        self.resources[RESOURCE_ENERGY] -= self.idle_cost
+        if (self.resources[RESOURCE_ENERGY] < 0):
+            return self._death()
+
+        if self.tstep >= self.actions_per_day + self.actions_per_night:
+            self.tstep = 0
+        if self.tstep >= self.actions_per_day:
+            # Enemies only move during the night...
+            fights, survived = self._move_enemies(self.player_position)
+            if not survived:
+                return self._death()
+            partial_reward += fights * self.fight_reward
+            # After their move, a new enemy may spawn...
+            prob = scipy.special.expit(self.time) * 2 - 1
+            if rng.random() < prob:
+                self.spawn_enemies(1, self.time)
+
+        return self.get_observation(), partial_reward, False, False, self.info()
 
     def step(self, action: int) -> tuple[Observation, float, bool, bool, dict]:
         act_type, data = parse_action(action)
         if act_type == ACTIONTYPE_MOVE:
             offset = position_offsets[data]
+            target_square = step(self.land.shape, self.player_position, offset)
+            move_cost = 0 if offset == (0,0) else land_info[self.land[target_square]].move_cost
+            if self.resources[RESOURCE_ENERGY] < move_cost:
+                return self._fail()
+            self.player_position = target_square
+            self.resources[RESOURCE_ENERGY] -= move_cost
+            return self._environment_turn()
+        elif act_type == ACTIONTYPE_INTERACT:
+            offset = position_offsets[data]
+            target_square = step(self.land.shape, self.player_position, offset)
+            success, new_r, new_s = land_info[self.land[target_square]].harvest.craft(self.resources, self.player_skills)
+            if not success:
+                return self._fail()
+            self.resources = new_r
+            self.player_skills = new_s
+            return self._environment_turn(self.harvest_reward)
+        elif act_type == ACTIONTYPE_CRAFT:
+            recipe = ORDERED_RECIPES[data]
+            success, new_r, new_s = recipe.craft(self.resources, self.player_skills)
+            if not success:
+                return self._fail()
+            self.resources = new_r
+            self.player_skills = new_s
+            return self._environment_turn(self.craft_reward)
+        else:
+            raise ValueError(f"Unable to process the given action as any type (action {action})")
 
     def render(self):
         # May or may not get implemented
@@ -373,13 +514,13 @@ class AgentNet(nn.Module):
     # I just kinda chose most of the numbers, we can play around with node amounts and add or remove layers
     def __init__(self):
         super(AgentNet, self).__init__()
-        # Input size based on number of outputs from Observation, not sure if thats the right amount
-        self.fc1 = nn.Linear(2 * VIEW_DISTANCE + 12, 32)
+        # Input size based on number of outputs from Observation
+        self.fc1 = nn.Linear(Observation.configured_size(), 32)
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(32, 20)
         self.relu2 = nn.ReLU()
         # Output size based on number of actions, couldn't find constant of how many actions exist, probably don't need one, just update if more actions
-        self.fc3 = nn.Linear(20, 11)
+        self.fc3 = nn.Linear(20, len(ACTIONSET_ALL))
 
     def forward(self, x):
         x = self.fc1(x)
