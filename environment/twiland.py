@@ -298,6 +298,7 @@ class Enemy:
     def __init__(self, position: tuple[int,int], power: float = 1):
         self.position = position
         self.power = power
+        self.dead = False
 
     def seek(self, target: tuple[int,int], land_size: tuple[int,int]) -> bool:
         if target == self.position:
@@ -412,7 +413,6 @@ class TwiLand(gymnasium.Env):
         cmap = colors.ListedColormap([land_type.color for land_type in land_info])
         dir = os.path.dirname(self.map_img_path)
         if (not os.path.exists(dir)): os.makedirs(dir)
-        print(self.land.shape)
         plt.imsave(self.map_img_path, self.land, cmap=cmap)
 
     def get_observation(self):
@@ -447,9 +447,12 @@ class TwiLand(gymnasium.Env):
                 success, new_r, new_s = e.fight().craft(self.resources, self.player_skills)
                 if not success:
                     return num_fights, False
+                e.dead = True
                 self.resources = new_r
                 self.player_skills = new_s
                 num_fights += 1
+        if num_fights > 0:
+            self.enemies = [e for e in self.enemies if not e.dead]
         return num_fights, True
 
     def _fail(self) -> tuple[Observation, float, bool, bool, dict]:
@@ -474,7 +477,7 @@ class TwiLand(gymnasium.Env):
                 return self._death()
             partial_reward += fights * self.fight_reward
             # After their move, a new enemy may spawn...
-            prob = scipy.special.expit(self.time) * 2 - 1
+            prob = (scipy.special.expit(self.time / 3) * 2 - 1) / self.actions_per_night
             if rng.random() < prob:
                 self.spawn_enemies(1, self.time)
 
