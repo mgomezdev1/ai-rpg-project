@@ -22,7 +22,7 @@ ACTIONSET_INTERACT = {ACTION_INTERACT, ACTION_INTERACT_RIGHT, ACTION_INTERACT_UP
 ACTION_CRAFT = 10
 ACTIONSET_CRAFT = {ACTION_CRAFT + i for i in range(len(RECIPESET))}
 
-position_offsets: list[tuple[int,int]] = [(0,0), (1,0), (0,1), (-1,0), (0,-1)]
+position_offsets: list[tuple[int,int]] = [(0,0), (0,1), (-1,0), (0,-1), (1,0)]
 
 ACTIONTYPE_MOVE = 0
 ACTIONTYPE_INTERACT = 1

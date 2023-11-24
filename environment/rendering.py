@@ -32,8 +32,10 @@ TEXT_TOP_OFFSET = ICON_SIZE / 2 - FONT_SIZE / 2
 # Will get recalculated on certain functions (side effects!)
 pixel_size = (1,1)
 
-def env_to_screen(env : TwiLand, coord: tuple[int,int]) -> tuple[int,int]:
+def env_to_screen(env : TwiLand, coord: tuple[int,int], transpose: bool = True) -> tuple[int,int]:
     global pixel_size
+    if transpose:
+        coord = (coord[1], coord[0])
     pixel_size = tuple(mx / sx for sx,mx in zip(env.land.shape, MAP_SIZE))
     return tuple(offset + (x + 0.5) * px for offset,x,px in zip(MAP_OFFSETS, coord, pixel_size))
 
