@@ -1,14 +1,9 @@
 import torch.nn as nn
-import torch.optim
-
+import torch.optim as optim
+import torch
 
 #from actions import ACTIONSET_MOVE, ACTIONTYPE_MOVE, ACTIONTYPE_INTERACT, ACTIONTYPE_TRAIN, SKILL_CHOPPING, SKILL_COMBAT, SKILL_CRAFTING, SKILL_FISHING, SKILL_MINING, SKILLSET, parse_action, position_offsets
 from twiland import VIEW_DISTANCE, DEFAULT_MAP_SIZE, TwiLand, generate_map
-
-
-
-
-
 
 class AgentNet(nn.Module):
     # I just kinda chose most of the numbers, we can play around with node amounts and add or remove layers
@@ -49,8 +44,8 @@ class Agent:
 
 
     def learn(self, lr: float = 0.01, epochs: int = 100):
-        optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
-
+        optimizer = optim.Adam(self.net.parameters(), lr=lr)
+        criterion = nn.CrossEntropyLoss()
         for epoch in range(epochs): 
             total_reward = 0
 
@@ -68,8 +63,14 @@ class Agent:
                 observation, reward, game_finished, truncated, info  = self.env.step(action)
                 total_reward += reward
 
+                # compute the loss
+                target = torch.tensor([action], dtype=torch.long)
+                loss = criterion(action_prob.view(1, -1), target)
+            
                 # zero the parameter gradients
                 optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
                 # No back pass, not sure how we want to implement it
 
@@ -81,4 +82,22 @@ class Agent:
 
     def play(self, game: TwiLand):
         # Plays the game with the given gameboard to termination
-        pass
+        total_reward = 0
+
+        game_finished = False
+        observation = game.get_observation()
+        while not game_finished:
+            # forward pass for action probabilities
+            flattened_data = torch.tensor(observation.flattened_data, dtype=torch.float32)
+            action_prob = torch.softmax(self.net(flattened_data), dim=-1)
+
+            # sample an action from the probability distribution
+            action = torch.multinomial(action_prob, 1).item()
+            # or pick the action with the highest probability
+            # action = torch.argmax(action_prob).item()
+
+            # take the decided action
+            observation, reward, game_finished, truncated, info  = game.step(action)
+            total_reward += reward
+        
+        return total_reward
