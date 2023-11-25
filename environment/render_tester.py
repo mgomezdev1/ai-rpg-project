@@ -26,16 +26,19 @@ keys = {
 keys.update({pygame.K_0 + i: ACTION_CRAFT + len(TRAINING_RECIPES) + len(EATING_RECIPES) + i for i in range(len(CRAFTING_RECIPES))})
 
 dead = False
+score = 0
 while True:
     if dead:
         env.set_map(twiland.generate_map((50,50)))
         env.reset()
+        score = 0
         dead = False
     for e in pygame.event.get():
         if e.type == pygame.KEYDOWN:
             for k,act in keys.items():
                 if e.key == k:
                     _, r, ter, trun, info = env.step(act)
+                    score += r
                     if ter or trun:
                         dead = True
             if e.key == pygame.K_p:
@@ -43,6 +46,8 @@ while True:
         if e.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+    
+    rendering.set_title_text(f"Current Day: {env.time:.0f}. Score: {score}")
     rendering.update_display(env)
  
     # --- Limit to 60 frames per second

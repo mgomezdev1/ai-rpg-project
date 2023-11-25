@@ -364,7 +364,8 @@ class Observation:
 class TwiLand(gymnasium.Env):
     def __init__(self, land: np.ndarray[int], player_position: tuple[int,int] | None = None, enable_rendering = True, 
             fail_reward: float = -1, fight_reward: float = 50, craft_reward: float = 20, harvest_reward: float = 5, survival_reward: float = 1,
-            max_days: float = 10, starting_energy: int = 10, actions_per_day: int = 10, actions_per_night: int = 5, idle_cost: float = 0.1):
+            max_days: float = 10, starting_energy: int = 10, actions_per_day: int = 10, actions_per_night: int = 10, idle_cost: float = 0.1, enemy_difficulty_scaling: tuple[float] = (0,1.0,),
+            **kwargs):
         self.land = land
         if not player_position:
             player_position = random_pos(land.shape)
@@ -377,7 +378,7 @@ class TwiLand(gymnasium.Env):
         self.tstep: int = 0 
         self.actions_per_day = actions_per_day
         self.actions_per_night = actions_per_night
-        self.map_img_path = "./temp/img/twiland_map.png"
+        self.map_img_path = kwargs.get("img_path", "./temp/img/twiland_map.png")
         self.enable_rendering = enable_rendering
         self.fail_reward = fail_reward
         self.fight_reward = fight_reward
@@ -386,6 +387,7 @@ class TwiLand(gymnasium.Env):
         self.urvival_reward = survival_reward
         self.max_days = max_days
         self.idle_cost = idle_cost
+        self.enemy_difficulty_scaling = enemy_difficulty_scaling
 
         # variables for reset
         self.starting_energy = starting_energy
@@ -435,6 +437,14 @@ class TwiLand(gymnasium.Env):
 
         return (self.get_observation(), self.info)
 
+    def get_enemy_power(self, time: float):
+        x = 1
+        power = 0
+        for coeff in self.enemy_difficulty_scaling:
+            power += coeff * x
+            x *= time
+        return power
+
     def _check_enemy_attacks(self, allow_move: bool = True) -> tuple[int, bool]:
         '''
             May move enemies and forces them to fight if they reach the player or the player reached them
@@ -479,7 +489,12 @@ class TwiLand(gymnasium.Env):
             # After their move, a new enemy may spawn...
             prob = (scipy.special.expit(self.time / 3) * 2 - 1) / self.actions_per_night
             if rng.random() < prob:
-                self.spawn_enemies(1, self.time)
+                self.spawn_enemies(1, self.get_enemy_power(self.time))
+
+        # energy reward
+        partial_reward += np.log(self.resources[RESOURCE_ENERGY])
+        # time reward
+        partial_reward += self.time
 
         return self.get_observation(), partial_reward, False, False, self.info
 

@@ -6,6 +6,7 @@ from utils import *
 rendering_enabled = False
 screen : pygame.Surface = None
 font : pygame.font.Font = None
+large_font : pygame.font.Font = None
 
 preloaded_skill_images : dict[int, pygame.Surface] = {}
 preloaded_resource_images : dict[int, pygame.Surface] = {}
@@ -22,12 +23,17 @@ MAP_SIZE = (700, 700)
 MAP_OFFSETS = tuple((sx - x) / 2 for sx,x in zip(SCREEN_SIZE,MAP_SIZE))
 
 FONT_SIZE = 20
+LARGE_FONT_SIZE = 32
 
 ICON_SIZE = 64
 ICON_SPACING = 4
 LEFT_ICONS = MAP_OFFSETS[0] / 4
 RIGHT_ICONS = SCREEN_SIZE[0] - (MAP_OFFSETS[0] * 3 / 4)
 TEXT_TOP_OFFSET = ICON_SIZE / 2 - FONT_SIZE / 2
+
+# Title text
+TITLE_MARGIN = 10
+title = ""
 
 # Will get recalculated on certain functions (side effects!)
 pixel_size = (1,1)
@@ -43,6 +49,7 @@ def enable_rendering():
     global rendering_enabled
     global screen
     global font
+    global large_font
     global preloaded_skill_images
     global preloaded_resource_images
     if rendering_enabled:
@@ -51,14 +58,22 @@ def enable_rendering():
     rendering_enabled = True
     pygame.init()
     font = pygame.font.Font(pygame.font.get_default_font(), FONT_SIZE)
+    large_font = pygame.font.Font(pygame.font.get_default_font(), LARGE_FONT_SIZE)
     screen = pygame.display.set_mode(SCREEN_SIZE)
     pygame.display.set_caption("TwiLand")
+
+    app_icon = pygame.image.load("./icons/App_Icon.png")
+    pygame.display.set_icon(app_icon)
 
     for identifier, img_name in [(RESOURCE_ENERGY, "Energy"), (RESOURCE_FRUIT, "Fruit"), (RESOURCE_WOOD, "Wood"), (RESOURCE_RAW_FISH, "Fish_Raw"), (RESOURCE_COOKED_FISH, "Fish_Cooked"), (RESOURCE_ORE, "Ore"), (RESOURCE_AXE, "Axe"), (RESOURCE_PICKAXE, "Pickaxe"), (RESOURCE_FISHING_ROD, "Fishing_Rod"), (RESOURCE_SWORD, "Sword")]:
         preloaded_resource_images[identifier] = pygame.transform.scale(pygame.image.load(f"./icons/{img_name}.png"), (ICON_SIZE, ICON_SIZE))
     for identifier, img_name in [(SKILL_CHOPPING, "Chopping_Skill"), (SKILL_FISHING, "Fishing_Skill"), (SKILL_MINING, "Mining_Skill"), (SKILL_CRAFTING, "Crafting_Skill"), (SKILL_COMBAT, "Combat_Skill")]:
         preloaded_skill_images[identifier] = pygame.transform.scale(pygame.image.load(f"./icons/{img_name}.png"), (ICON_SIZE, ICON_SIZE))
-    
+
+def set_title_text(new_text: str):
+    global title
+    title = new_text
+
 # Used to manage how fast the screen updates
 clock = pygame.time.Clock()
 
@@ -89,6 +104,9 @@ def update_display(env : TwiLand):
         txt = font.render(f"x {env.resources[resource]:.2f}" if resource == RESOURCE_ENERGY else f"x {env.resources[resource]:.0f}", True, (255,255,255))
         screen.blit(txt, (RIGHT_ICONS + ICON_SIZE + ICON_SPACING, y + TEXT_TOP_OFFSET), txt.get_rect())
         y += ICON_SIZE + ICON_SPACING
+
+    title_txt = large_font.render(title, True, (255,255,255))
+    screen.blit(title_txt, (SCREEN_SIZE[0] / 2 - title_txt.get_rect().width / 2, TITLE_MARGIN), title_txt.get_rect())
 
     # --- Go ahead and update the screen with what we've drawn.
     pygame.display.flip()
