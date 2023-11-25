@@ -104,3 +104,13 @@ class Agent:
             total_reward += reward
         
         return total_reward
+    
+    def save_model(self, filename: str):
+        state = self.net.state_dict()
+        with open(filename, "w") as f:
+            torch.save(state, f)
+
+    def load_model(self, filename: str):
+        with open(filename, "r") as f:
+            state = torch.load(f)
+            self.net.load_state_dict(state)
