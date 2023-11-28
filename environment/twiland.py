@@ -475,7 +475,7 @@ class TwiLand(gymnasium.Env):
         self.tstep += 1
         self.time += 1 / (self.actions_per_day + self.actions_per_night)
         self.resources[RESOURCE_ENERGY] -= self.idle_cost
-        if (self.resources[RESOURCE_ENERGY] < 0):
+        if (self.resources[RESOURCE_ENERGY] <= 0):
             return self._death()
 
         if self.tstep >= self.actions_per_day + self.actions_per_night:

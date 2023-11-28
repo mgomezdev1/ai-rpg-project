@@ -5,6 +5,8 @@ import torch
 import random
 import os
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+import numpy as np
 
 #from actions import ACTIONSET_MOVE, ACTIONTYPE_MOVE, ACTIONTYPE_INTERACT, ACTIONTYPE_TRAIN, SKILL_CHOPPING, SKILL_COMBAT, SKILL_CRAFTING, SKILL_FISHING, SKILL_MINING, SKILLSET, parse_action, position_offsets
 from twiland import VIEW_DISTANCE, DEFAULT_MAP_SIZE, Observation, TwiLand, generate_map
@@ -27,19 +29,19 @@ class AgentNet(nn.Module):
 
     def forward(self, x):
         x = self.fc1(x)
-        x = self.batch_norm1(x.view(x.size(0), -1))
-        x = x.view(x.size(0), -1)
+        #x = self.batch_norm1(x.view(x.size(0), -1))
+        #x = x.view(x.size(0), -1)
         x = self.relu(x)
-        print(x, "x shape")
+        #print(len(x), "x shape")
         x = self.fc2(x)
-        x = self.batch_norm2(x.view(x.size(0), -1))
+        #x = self.batch_norm2(x.view(x.size(0), -1))
         x = self.relu2(x)
         x = self.fc3(x)
         x = F.softmax(x, dim=-1)
         return x
     
 class Agent:
-    def __init__(self, generate_new: bool = True, game: TwiLand | None = None, map_size: int | None = None):
+    def __init__(self, generate_new: bool = True, game: TwiLand | None = None, map_size: int | None = None, enable_rendering: bool = False):
         self.net = AgentNet()
         self.generate_new = generate_new
         self.replay_buffer = []
@@ -53,7 +55,7 @@ class Agent:
         if game is not None:
             self.env = game
         else:
-            self.env = TwiLand(generate_map((self.map_size, self.map_size)))
+            self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=enable_rendering)
 
 
     def store_experience(self, experience):
@@ -104,7 +106,7 @@ class Agent:
                     for i in range(batch_size):
                         target = rewards[i]
                         if not terminals[i]:
-                            target += 0.9 * torch.max(q_values_next[i])
+                            target += 0.9 * torch.max(q_values_next)
                         target_q_values[i][actions[i]] = target
 
                     loss = criterion(q_values_current, target_q_values)
@@ -136,7 +138,7 @@ class Agent:
         if random.random() < exploration_rate:
             action = random.randint(0, 10)
         else:
-            print(action_prob)
+            #print(action_prob)
             action = torch.multinomial(action_prob, 1).item()
 
         return action
@@ -176,7 +178,7 @@ class Agent:
             self.net.load_state_dict(state)
 
 #train the agent
-num_episodes = [100, 1000, 5000]
+num_episodes = [300]#, 5000]
 max_steps = 1000
 scores = {} # list containing scores from each episode
 
@@ -185,9 +187,12 @@ for model in num_episodes:
     agent = Agent(map_size=50)
     agent.learn(epochs=model)
     for episode in range(100):
+        agent.env.reset()
         episode_reward = agent.play(agent.env)
-        print(f"Episode {episode + 1}/{num_episodes}, Total Reward: {episode_reward}")
-        model_scores.append(episode_reward) 
+        # Add 1000 to reward to account for death
+        print(f"Episode {episode + 1}/{num_episodes}, Total Reward: {episode_reward + 1000}")
+        model_scores.append(episode_reward + 1000)
+    print(f"Mean {model} Score: {np.mean(model_scores)}")
     scores[model] = model_scores
     agent.save_model(f"{model}it.pt")
 
