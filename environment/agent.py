@@ -1,7 +1,9 @@
 import torch.nn as nn
 import torch.optim as optim
 import torch
-import tqdm
+import random
+import os
+from tqdm import tqdm
 
 #from actions import ACTIONSET_MOVE, ACTIONTYPE_MOVE, ACTIONTYPE_INTERACT, ACTIONTYPE_TRAIN, SKILL_CHOPPING, SKILL_COMBAT, SKILL_CRAFTING, SKILL_FISHING, SKILL_MINING, SKILLSET, parse_action, position_offsets
 from twiland import VIEW_DISTANCE, DEFAULT_MAP_SIZE, Observation, TwiLand, generate_map
@@ -43,13 +45,13 @@ class Agent:
         if game is not None:
             self.env = game
         else:
-            self.env = TwiLand(generate_map(self.map_size, self.map_size))
+            self.env = TwiLand(generate_map((self.map_size, self.map_size)))
 
 
     def store_experience(self, experience):
         self.replay_buffer.append(experience)
 
-    def learn(self, lr: float = 0.01, epochs: int = 100, replay_buffer_size: int = 1000, batch_size: int = 32):
+    def learn(self, lr: float = 0.0001, epochs: int = 100, replay_buffer_size: int = 1000, batch_size: int = 10):
         optimizer = optim.Adam(self.net.parameters(), lr=lr) # learning rate schedule?
         criterion = nn.CrossEntropyLoss()
 
@@ -63,7 +65,7 @@ class Agent:
             game_finished = False
             observation, _ = self.env.reset()
             while not game_finished:
-                action = self.select_action(observation)
+                action = self.select_action(observation, exploration_rate=1.0 - epoch / epochs)
 
                 next_observation, reward, terminal, truncated, info = self.env.step(action)
                 game_finished = terminal or truncated
@@ -78,10 +80,11 @@ class Agent:
                     batch = random.sample(self.replay_buffer, batch_size)
 
                     #extract components of the batch
-                    observations, actions, rewards, terminals, truncations, infos = zip(*batch)
+                    observations, actions, rewards, terminals, _, _ = zip(*batch)
 
                     #convert observations to tensors
-                    obs_tensor = torch.tensor(observations, dtype=torch.float32)
+                    flattened_data = [obs.flattened_data for obs in observations]
+                    obs_tensor = torch.tensor(flattened_data, dtype=torch.float32)
                     next_obs_tensor = torch.tensor(next_observation.flattened_data, dtype=torch.float32)
 
                     #compute Q-values for current and next states
@@ -93,26 +96,32 @@ class Agent:
                     for i in range(batch_size):
                         target = rewards[i]
                         if not terminals[i]:
-                            target += self.env.gamma * torch.max(q_values_next[i])
+                            target += 0.9 * torch.max(q_values_next[i])
                         target_q_values[i][actions[i]] = target
 
                     loss = criterion(q_values_current, target_q_values)
                     optimizer.zero_grad()
                     loss.backward()
+                    torch.nn.utils.clip_grad_norm(self.net.parameters(), max_norm=1.0)
                     optimizer.step()
 
                 observation = next_observation
 
 
-    def select_action(self, observation: Observation):
+    def select_action(self, observation: Observation, exploration_rate: float = 0.1):
         # forward pass for action probabilities
         flattened_data = torch.tensor(observation.flattened_data, dtype=torch.float32)
-        action_prob = torch.softmax(self.net(flattened_data), dim=-1)
-
-        # sample an action from the probability distribution
-        action = torch.multinomial(action_prob, 1).item()
+        # print("Flattened Data:", flattened_data)
+        # print("Network Output:", self.net(flattened_data))
+        # print("Max Value:", torch.max(self.net(flattened_data)))
+        action_prob = torch.exp(torch.log_softmax(self.net(flattened_data) - torch.max(self.net(flattened_data)), dim=-1) + 1e-8)
+        action_prob = torch.clamp(action_prob, min=1e-8)
         # or pick the action with the highest probability
         # action = torch.argmax(action_prob).item()
+        if random.random() < exploration_rate:
+            action = random.randint(0, 10)
+        else:
+            action = torch.multinomial(action_prob, 1).item()
 
         return action
 
@@ -139,12 +148,17 @@ class Agent:
         return total_reward
     
     def save_model(self, filename: str):
-        state = self.net.state_dict()
-        with open(filename, "w") as f:
+        os.makedirs("models", exist_ok=True)
+        file_path = os.path.join("models", filename)
+
+        state = {key: value.cpu() if isinstance(value, torch.Tensor) else value for key, value in self.net.state_dict().items()}
+
+        with open(file_path, "wb") as f:
             torch.save(state, f)
 
     def load_model(self, filename: str):
-        with open(filename, "r") as f:
+        file_path = os.path.join("models", filename)
+        with open(file_path, "r") as f:
             state = torch.load(f)
             self.net.load_state_dict(state)
 
