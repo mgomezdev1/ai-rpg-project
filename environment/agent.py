@@ -118,10 +118,7 @@ class Agent:
         action_prob = torch.clamp(action_prob, min=1e-8)
         # or pick the action with the highest probability
         # action = torch.argmax(action_prob).item()
-        if random.random() < exploration_rate:
-            action = random.randint(0, 10)
-        else:
-            action = torch.multinomial(action_prob, 1).item()
+        action = random.randint(0, 10)
 
         return action
 
