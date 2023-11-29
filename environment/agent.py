@@ -7,6 +7,7 @@ import os
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
+import rendering
 
 #from actions import ACTIONSET_MOVE, ACTIONTYPE_MOVE, ACTIONTYPE_INTERACT, ACTIONTYPE_TRAIN, SKILL_CHOPPING, SKILL_COMBAT, SKILL_CRAFTING, SKILL_FISHING, SKILL_MINING, SKILLSET, parse_action, position_offsets
 from twiland import VIEW_DISTANCE, DEFAULT_MAP_SIZE, Observation, TwiLand, generate_map
@@ -17,14 +18,14 @@ class AgentNet(nn.Module):
         super(AgentNet, self).__init__()
         # Input size based on number of outputs from Observation
         # This can be obtained from Observation.configured_size()
-        self.fc1 = nn.Linear(Observation.configured_size(), 32)
-        self.batch_norm1 = nn.BatchNorm1d(32, affine=False, track_running_stats=False)
+        self.fc1 = nn.Linear(Observation.configured_size(), 500)
+        self.batch_norm1 = nn.BatchNorm1d(500, affine=False, track_running_stats=False)
         self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(32, 20)
-        self.batch_norm2 = nn.BatchNorm1d(20, affine=False, track_running_stats=False)
+        self.fc2 = nn.Linear(500, 300)
+        self.batch_norm2 = nn.BatchNorm1d(300, affine=False, track_running_stats=False)
         self.relu2 = nn.ReLU()
         # Output size based on number of actions, couldn't find constant of how many actions exist, probably don't need one, just update if more actions
-        self.fc3 = nn.Linear(20, 11)
+        self.fc3 = nn.Linear(300, 11)
 
 
     def forward(self, x):
@@ -65,6 +66,8 @@ class Agent:
     def learn(self, lr: float = 0.1, epochs: int = 100, replay_buffer_size: int = 1000, batch_size: int = 32):
         optimizer = optim.Adam(self.net.parameters(), lr=lr) # learning rate schedule?
         criterion = nn.CrossEntropyLoss()
+
+        rendering.enable_rendering()
 
         for epoch in tqdm(range(epochs)): 
             total_reward = 0
@@ -125,6 +128,7 @@ class Agent:
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)
                     optimizer.step()
+                rendering.update_display(self.env)
 
                 observation = next_observation
 
