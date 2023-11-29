@@ -45,6 +45,7 @@ class Agent:
         self.net = AgentNet()
         self.generate_new = generate_new
         self.replay_buffer = []
+        self.energy = 500
         # Sets the map size
         if map_size is None:
             self.map_size = DEFAULT_MAP_SIZE
@@ -55,13 +56,13 @@ class Agent:
         if game is not None:
             self.env = game
         else:
-            self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=enable_rendering)
+            self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=enable_rendering, starting_energy=10)
 
 
     def store_experience(self, experience):
         self.replay_buffer.append(experience)
 
-    def learn(self, lr: float = 0.0001, epochs: int = 100, replay_buffer_size: int = 1000, batch_size: int = 32):
+    def learn(self, lr: float = 0.1, epochs: int = 100, replay_buffer_size: int = 1000, batch_size: int = 32):
         optimizer = optim.Adam(self.net.parameters(), lr=lr) # learning rate schedule?
         criterion = nn.CrossEntropyLoss()
 
@@ -77,10 +78,18 @@ class Agent:
             while not game_finished:
                 action = self.select_action(observation, exploration_rate=0.1)
 
+                # Throws away the game if something blows up
+                if action == -1:
+                    game_finished = True
+
                 next_observation, reward, terminal, truncated, info = self.env.step(action)
                 game_finished = terminal or truncated
 
-                total_reward += reward
+                # Stops the game if the reward is infinite
+                if np.isinf(reward):
+                    game_finished = True
+                else:
+                    total_reward += reward
 
                 #store experiences in the replay buffer
                 self.store_experience((observation, action, reward, terminal, truncated, info))
@@ -93,7 +102,8 @@ class Agent:
                     observations, actions, rewards, terminals, _, _ = zip(*batch)
 
                     #convert observations to tensors
-                    flattened_data = [obs.flattened_data for obs in observations]
+                    flattened_data = np.stack([obs.flattened_data for obs in observations])
+                    #print(flattened_data)
                     obs_tensor = torch.tensor(flattened_data, dtype=torch.float32)
                     next_obs_tensor = torch.tensor(next_observation.flattened_data, dtype=torch.float32)
 
@@ -112,7 +122,7 @@ class Agent:
                     loss = criterion(q_values_current, target_q_values)
                     optimizer.zero_grad()
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm(self.net.parameters(), max_norm=1.0)
+                    torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)
                     optimizer.step()
 
                 observation = next_observation
@@ -125,7 +135,7 @@ class Agent:
         # Check for invalid values in action_logits
         if torch.isnan(action_logits).any() or torch.isinf(action_logits).any():
             print("Invalid values detected in action_logits.")
-            return 0  # Or handle this case appropriately
+            return -1  # Or handle this case appropriately
 
         # Apply softmax to get probabilities
         action_prob = torch.exp(torch.log_softmax(action_logits, dim=-1) + 1e-8)
@@ -133,7 +143,7 @@ class Agent:
         # Check for invalid values in action_prob
         if torch.isnan(action_prob).any() or torch.isinf(action_prob).any():
             print("Invalid values detected in action_prob.")
-            return 0  # Or handle this case appropriately
+            return -1  # Or handle this case appropriately
 
         if random.random() < exploration_rate:
             action = random.randint(0, 10)
@@ -178,7 +188,7 @@ class Agent:
             self.net.load_state_dict(state)
 
 #train the agent
-num_episodes = [300]#, 5000]
+num_episodes = [20]#, 5000]
 max_steps = 1000
 scores = {} # list containing scores from each episode
 
@@ -190,8 +200,9 @@ for model in num_episodes:
         agent.env.reset()
         episode_reward = agent.play(agent.env)
         # Add 1000 to reward to account for death
-        print(f"Episode {episode + 1}/{num_episodes}, Total Reward: {episode_reward + 1000}")
-        model_scores.append(episode_reward + 1000)
+        if not np.isinf(episode_reward):
+            print(f"Episode {episode + 1}/{num_episodes}, Total Reward: {episode_reward + 1000}")
+            model_scores.append(episode_reward + 1000)
     print(f"Mean {model} Score: {np.mean(model_scores)}")
     scores[model] = model_scores
     agent.save_model(f"{model}it.pt")
@@ -203,4 +214,4 @@ for model, scores in scores.items():
     plt.plot(np.arange(len(scores)), scores)
     plt.ylabel('Score')
     plt.xlabel('Episode #')
-    plt.show()
+    #plt.show()

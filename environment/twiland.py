@@ -469,6 +469,7 @@ class TwiLand(gymnasium.Env):
         return self._environment_turn(self.fail_reward)
 
     def _death(self) -> tuple[Observation, float, bool, bool, dict]:
+        print(self.tstep)
         return self.get_observation(), -1000, True, False, self.info
 
     def _environment_turn(self, partial_reward = 0) -> tuple[Observation, float, bool, bool, dict]:
