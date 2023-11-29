@@ -4,9 +4,10 @@ import torch.nn.functional as F
 import torch
 import random
 import os
-#from tqdm import tqdm
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
+import rendering
 
 #from actions import ACTIONSET_MOVE, ACTIONTYPE_MOVE, ACTIONTYPE_INTERACT, ACTIONTYPE_TRAIN, SKILL_CHOPPING, SKILL_COMBAT, SKILL_CRAFTING, SKILL_FISHING, SKILL_MINING, SKILLSET, parse_action, position_offsets
 from twiland import VIEW_DISTANCE, DEFAULT_MAP_SIZE, Observation, TwiLand, generate_map
@@ -17,16 +18,16 @@ class AgentNet(nn.Module):
         super(AgentNet, self).__init__()
         # Input size based on number of outputs from Observation
         # This can be obtained from Observation.configured_size()
-        self.fc1 = nn.Linear(Observation.configured_size(), 212)
-        self.batch_norm1 = nn.BatchNorm1d(212, affine=False, track_running_stats=False)
+        self.fc1 = nn.Linear(Observation.configured_size(), 500)
+        self.batch_norm1 = nn.BatchNorm1d(500, affine=False, track_running_stats=False)
         self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(212, 500)
-        self.batch_norm2 = nn.BatchNorm1d(50, affine=False, track_running_stats=False)
+        self.fc2 = nn.Linear(500, 300)
+        self.batch_norm2 = nn.BatchNorm1d(300, affine=False, track_running_stats=False)
         self.relu2 = nn.ReLU()
         self.fc3 = nn.Linear(500, 50)
         self.relu3 = nn.ReLU()
         # Output size based on number of actions, couldn't find constant of how many actions exist, probably don't need one, just update if more actions
-        self.fc4 = nn.Linear(50, 11)
+        self.fc3 = nn.Linear(300, 11)
 
 
     def forward(self, x):
@@ -74,8 +75,9 @@ class Agent:
         epsilon_min = 0.01
         epsilon_decay = 0.995
 
-        #for epoch in tqdm(range(epochs)):
-        for epoch in range(epochs): 
+        rendering.enable_rendering()
+
+        for epoch in tqdm(range(epochs)): 
             total_reward = 0
 
             # generates a new map if necessary
@@ -138,6 +140,7 @@ class Agent:
                     loss.backward()
                     #torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)
                     optimizer.step()
+                rendering.update_display(self.env)
 
                 observation = next_observation
 
