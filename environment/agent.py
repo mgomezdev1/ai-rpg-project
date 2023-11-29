@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torch
 import random
 import os
-from tqdm import tqdm
+#from tqdm import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -17,14 +17,16 @@ class AgentNet(nn.Module):
         super(AgentNet, self).__init__()
         # Input size based on number of outputs from Observation
         # This can be obtained from Observation.configured_size()
-        self.fc1 = nn.Linear(Observation.configured_size(), 32)
-        self.batch_norm1 = nn.BatchNorm1d(32, affine=False, track_running_stats=False)
+        self.fc1 = nn.Linear(Observation.configured_size(), 212)
+        self.batch_norm1 = nn.BatchNorm1d(212, affine=False, track_running_stats=False)
         self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(32, 20)
-        self.batch_norm2 = nn.BatchNorm1d(20, affine=False, track_running_stats=False)
+        self.fc2 = nn.Linear(212, 500)
+        self.batch_norm2 = nn.BatchNorm1d(50, affine=False, track_running_stats=False)
         self.relu2 = nn.ReLU()
+        self.fc3 = nn.Linear(500, 50)
+        self.relu3 = nn.ReLU()
         # Output size based on number of actions, couldn't find constant of how many actions exist, probably don't need one, just update if more actions
-        self.fc3 = nn.Linear(20, 11)
+        self.fc4 = nn.Linear(50, 11)
 
 
     def forward(self, x):
@@ -37,7 +39,9 @@ class AgentNet(nn.Module):
         #x = self.batch_norm2(x.view(x.size(0), -1))
         x = self.relu2(x)
         x = self.fc3(x)
-        x = F.softmax(x, dim=-1)
+        x = self.relu3(x)
+        x = self.fc4(x)
+        #x = F.softmax(x, dim=-1)
         return x
     
 class Agent:
@@ -56,7 +60,7 @@ class Agent:
         if game is not None:
             self.env = game
         else:
-            self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=enable_rendering, starting_energy=500)
+            self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=enable_rendering, starting_energy=self.energy)
 
 
     def store_experience(self, experience):
@@ -64,20 +68,29 @@ class Agent:
 
     def learn(self, lr: float = 0.1, epochs: int = 100, replay_buffer_size: int = 1000, batch_size: int = 32):
         optimizer = optim.Adam(self.net.parameters(), lr=lr) # learning rate schedule?
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.MSELoss()
+        energy_decay = np.log(40 / self.energy) / epochs
+        epsilon = 0.5
+        epsilon_min = 0.01
+        epsilon_decay = 0.995
 
-        for epoch in tqdm(range(epochs)): 
+        #for epoch in tqdm(range(epochs)):
+        for epoch in range(epochs): 
             total_reward = 0
 
             # generates a new map if necessary
             if self.generate_new:
-                self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=False, starting_energy=self.energy-(epoch * 0.01 * self.energy))
-                #print("Starting Energy: ", self.energy-(epoch * 0.01 * self.energy))
+                self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=False, starting_energy=int(self.energy * np.exp(energy_decay * epoch)))
+                                   #, idle_cost=np.round(0.1*(1/epochs)*epoch, 4))
+            else:
+                self.env.starting_energy = int(self.energy * np.exp(energy_decay * epoch))
+
+            print("Starting Energy: ", self.env.starting_energy)
 
             game_finished = False
             observation, _ = self.env.reset()
             while not game_finished:
-                action = self.select_action(observation, exploration_rate=0.1)
+                action = self.select_action(observation, exploration_rate=max(epsilon_min, min(epsilon, 1.0 - np.log10((epoch + 1) * epsilon_decay))))
 
                 # Throws away the game if something blows up
                 if action == -1:
@@ -86,12 +99,13 @@ class Agent:
                 next_observation, reward, terminal, truncated, info = self.env.step(action)
                 game_finished = terminal or truncated
 
+
                 # Stops the game if the reward is infinite
                 if np.isinf(reward):
                     game_finished = True
                 else:
                     total_reward += reward
-
+  
                 #store experiences in the replay buffer
                 self.store_experience((observation, action, reward, terminal, truncated, info))
 
@@ -104,7 +118,6 @@ class Agent:
 
                     #convert observations to tensors
                     flattened_data = np.stack([obs.flattened_data for obs in observations])
-                    #print(flattened_data)
                     obs_tensor = torch.tensor(flattened_data, dtype=torch.float32)
                     next_obs_tensor = torch.tensor(next_observation.flattened_data, dtype=torch.float32)
 
@@ -123,10 +136,11 @@ class Agent:
                     loss = criterion(q_values_current, target_q_values)
                     optimizer.zero_grad()
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)
+                    #torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)
                     optimizer.step()
 
                 observation = next_observation
+
 
 
     def select_action(self, observation: Observation, exploration_rate: float = 0.1):
@@ -149,7 +163,6 @@ class Agent:
         if random.random() < exploration_rate:
             action = random.randint(0, 10)
         else:
-            #print(action_prob)
             action = torch.multinomial(action_prob, 1).item()
 
         return action
@@ -195,19 +208,20 @@ scores = {} # list containing scores from each episode
 
 for model in num_episodes:
     model_scores = []
-    agent = Agent(map_size=25)
+    agent = Agent(map_size=50, generate_new=True)
     agent.learn(epochs=model)
 
     # Generate a new game to test on
-    agent.env = TwiLand(generate_map((agent.map_size, agent.map_size)), enable_rendering=False)
+    agent.env = TwiLand(generate_map((agent.map_size, agent.map_size)), enable_rendering=False, starting_energy=50)
+    #agent.env.starting_energy = 50
     for episode in range(100):
         agent.env.reset()
-        episode_reward = agent.play(agent.env)
+        episode_reward = agent.play(agent.env) + 1000
         # Add 1000 to reward to account for death
         if not np.isinf(episode_reward):
-            print(f"Episode {episode + 1}/{100}, Total Reward: {episode_reward + 1000}")
-            model_scores.append(episode_reward + 1000)
-    print(f"Mean {model} Score: {np.mean(model_scores)}")
+            print(f"Episode {episode + 1}/{100}, Total Reward: {episode_reward}")
+            model_scores.append(episode_reward)
+    print(f"Mean Score: {np.mean(model_scores)}")
     scores[model] = model_scores
     agent.save_model(f"{model}it.pt")
 
