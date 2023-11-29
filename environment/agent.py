@@ -56,7 +56,7 @@ class Agent:
         if game is not None:
             self.env = game
         else:
-            self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=enable_rendering, starting_energy=10)
+            self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=enable_rendering, starting_energy=500)
 
 
     def store_experience(self, experience):
@@ -71,7 +71,8 @@ class Agent:
 
             # generates a new map if necessary
             if self.generate_new:
-                self.env.set_map(generate_map((self.map_size, self.map_size)))
+                self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=False, starting_energy=self.energy-(epoch * 0.01 * self.energy))
+                #print("Starting Energy: ", self.energy-(epoch * 0.01 * self.energy))
 
             game_finished = False
             observation, _ = self.env.reset()
@@ -188,20 +189,23 @@ class Agent:
             self.net.load_state_dict(state)
 
 #train the agent
-num_episodes = [20]#, 5000]
+num_episodes = [100]#, 5000]
 max_steps = 1000
 scores = {} # list containing scores from each episode
 
 for model in num_episodes:
     model_scores = []
-    agent = Agent(map_size=50)
+    agent = Agent(map_size=25)
     agent.learn(epochs=model)
+
+    # Generate a new game to test on
+    agent.env = TwiLand(generate_map((agent.map_size, agent.map_size)), enable_rendering=False)
     for episode in range(100):
         agent.env.reset()
         episode_reward = agent.play(agent.env)
         # Add 1000 to reward to account for death
         if not np.isinf(episode_reward):
-            print(f"Episode {episode + 1}/{num_episodes}, Total Reward: {episode_reward + 1000}")
+            print(f"Episode {episode + 1}/{100}, Total Reward: {episode_reward + 1000}")
             model_scores.append(episode_reward + 1000)
     print(f"Mean {model} Score: {np.mean(model_scores)}")
     scores[model] = model_scores
