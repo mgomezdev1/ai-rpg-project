@@ -256,7 +256,7 @@ def draw_world(land: np.ndarray[int], player: tuple[int,int], enemies: list[tupl
 def crop_map_submatrix(land: np.ndarray[int], center: tuple[int,int], radius: int) -> np.ndarray[int]:
     cx, cy = center
     size = 2 * radius + 1
-    return np.roll(land, (-cx + radius, -cy + radius))[:size,:size]
+    return np.roll(land, (-cx + radius, -cy + radius), axis=(0,1))[:size,:size]
 
 def compute_mask(size: int, norm: NormType) -> np.ndarray[bool]:
     center = size // 2
@@ -351,12 +351,16 @@ class Enemy:
 class Observation:
     def __init__(self, neighbours: np.ndarray[int], enemies: np.ndarray[int], time: float, skills: np.ndarray[float], resources: np.ndarray[int], view_mask: np.ndarray[bool]):
         self.flat_neighbors = np.extract(view_mask, neighbours)
+        self.flat_neighbors_encoded = np.concatenate([(self.flat_neighbors == land_info[i].id).ravel() for i in range(len(land_info))])
         self.flat_enemies   = np.extract(view_mask, enemies)
         self.sigmoid_time   = scipy.special.expit(np.array([time / 5 - 1, ((time % 1) - 0.5) * 10]))
         self.sigmoid_skills = scipy.special.expit(skills / 5 - 1)
         self.sigmoid_resources = scipy.special.expit(resources / 5 - 1)
         # Not sure if we want to include sigmoid_resources in flattened data
-        self.flattened_data = np.concatenate([self.flat_neighbors, self.flat_enemies, self.sigmoid_time, self.sigmoid_skills], axis=0, dtype=np.float32)
+        self.flattened_data = np.concatenate([self.flat_neighbors_encoded, self.flat_enemies, self.sigmoid_time, self.sigmoid_skills], axis=0, dtype=np.float32)
+
+    def __repr__(self) -> str:
+        return f"N:{self.flat_neighbors_encoded} - E:{self.flat_enemies} - st:{self.sigmoid_time} -> {self.flattened_data.__repr__()}"
 
     def configured_size() -> int:
         return TwiLand(generate_map((3 * VIEW_DISTANCE, 3 * VIEW_DISTANCE)), enable_rendering=False).get_observation().flattened_data.shape[0]
@@ -469,7 +473,6 @@ class TwiLand(gymnasium.Env):
         return self._environment_turn(self.fail_reward)
 
     def _death(self) -> tuple[Observation, float, bool, bool, dict]:
-        print(self.tstep)
         return self.get_observation(), -1000, True, False, self.info
 
     def _environment_turn(self, partial_reward = 0) -> tuple[Observation, float, bool, bool, dict]:
@@ -542,5 +545,9 @@ class TwiLand(gymnasium.Env):
 
 # TESTING
 if __name__ == "__main__":
-    TwiLand(generate_map((50,50)))
-    print(Observation.configured_size())
+    env = TwiLand(generate_map((50,50)))
+    obs, _ = env.reset()
+    print(obs)
+    print(obs.flattened_data.shape)
+    print(crop_map_submatrix(env.land, (10,10), 4))
+    draw_map(env.land, True)

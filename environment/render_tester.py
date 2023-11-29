@@ -37,7 +37,8 @@ while True:
         if e.type == pygame.KEYDOWN:
             for k,act in keys.items():
                 if e.key == k:
-                    _, r, ter, trun, info = env.step(act)
+                    obs, r, ter, trun, info = env.step(act)
+                    print(obs)
                     score += r
                     if ter or trun:
                         dead = True
