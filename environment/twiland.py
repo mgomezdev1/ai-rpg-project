@@ -368,7 +368,8 @@ class Observation:
 class TwiLand(gymnasium.Env):
     def __init__(self, land: np.ndarray[int], player_position: tuple[int,int] | None = None, enable_rendering = True, 
             fail_reward: float = -1, fight_reward: float = 50, craft_reward: float = 20, harvest_reward: float = 5, survival_reward: float = 1,
-            max_days: float = 10, starting_energy: int = 10, actions_per_day: int = 10, actions_per_night: int = 10, idle_cost: float = 0.1, enemy_difficulty_scaling: tuple[float] = (0,1.0,),
+            max_days: float = 100, starting_energy: int = 10, actions_per_day: int = 10, actions_per_night: int = 10, idle_cost: float = 0.1, enemy_difficulty_scaling: tuple[float] = (0,1.0,),
+            time_reward_factor: float = 1, energy_reward_factor: float = 1, successes_reward_factor: float = 1, energy_gain_reward: float = 1,
             **kwargs):
         self.land = land
         if not player_position:
@@ -383,24 +384,36 @@ class TwiLand(gymnasium.Env):
         self.actions_per_day = actions_per_day
         self.actions_per_night = actions_per_night
         self.map_img_path = kwargs.get("img_path", "./temp/img/twiland_map.png")
-        self.enable_rendering = enable_rendering
         self.fail_reward = fail_reward
         self.fight_reward = fight_reward
         self.craft_reward = craft_reward
         self.harvest_reward = harvest_reward
-        self.urvival_reward = survival_reward
+        self.survival_reward = survival_reward
         self.max_days = max_days
         self.idle_cost = idle_cost
         self.enemy_difficulty_scaling = enemy_difficulty_scaling
+        self.time_reward_factor = time_reward_factor 
+        self.energy_reward_factor = energy_reward_factor 
+        self.successes_reward_factor = successes_reward_factor
+        self.energy_gain_reward = energy_gain_reward
 
         # variables for reset
         self.starting_energy = starting_energy
+        self.successful_actions = 0
+        self.last_energy = self.resources[RESOURCE_ENERGY]
 
+        self.rendering_enabled = False
         self.info = {}
         if enable_rendering:
-            import rendering
-            self.save_map()
-            rendering.enable_rendering()
+            self.enable_rendering()
+
+    def enable_rendering(self):
+        if self.rendering_enabled:
+            return
+        self.rendering_enabled = True
+        import rendering
+        self.save_map()
+        rendering.enable_rendering()
 
     def spawn_enemies(self, count: int = 1, power: float = 1):
         for i in range(count):
@@ -412,7 +425,7 @@ class TwiLand(gymnasium.Env):
 
     def set_map(self, land: np.ndarray[int]):
         self.land = land
-        if self.enable_rendering:
+        if self.rendering_enabled:
             self.save_map()
         
     def save_map(self):
@@ -435,8 +448,11 @@ class TwiLand(gymnasium.Env):
         self.player_position = random_pos(self.land.shape)
         self.time = 0
         self.tstep = 0
+        self.successful_actions = 0
         self.player_skills = np.ones(len(SKILLSET))
         self.resources = dict_to_array({RESOURCE_ENERGY: self.starting_energy}, len(RESOURCESET))
+        self.last_energy = self.resources[RESOURCE_ENERGY]
+        self.last_resources = self.resources.copy()
         self.enemies = []
 
         return (self.get_observation(), self.info)
@@ -470,14 +486,19 @@ class TwiLand(gymnasium.Env):
         return num_fights, True
 
     def _fail(self) -> tuple[Observation, float, bool, bool, dict]:
-        return self._environment_turn(self.fail_reward, env_reward_multiplier = 0.1)
+        return self._environment_turn(self.fail_reward, env_reward_multiplier = 0.1, success = False)
 
     def _death(self) -> tuple[Observation, float, bool, bool, dict]:
         return self.get_observation(), -1000, True, False, self.info
 
-    def _environment_turn(self, partial_reward = 0, env_reward_multiplier = 1) -> tuple[Observation, float, bool, bool, dict]:
+    def _environment_turn(self, partial_reward = 0, env_reward_multiplier = 1, success: bool = True) -> tuple[Observation, float, bool, bool, dict]:
         self.tstep += 1
         self.time += 1 / (self.actions_per_day + self.actions_per_night)
+        if success: 
+            self.successful_actions += env_reward_multiplier
+            energy_delta = self.resources[RESOURCE_ENERGY] - self.last_energy
+            partial_reward += max(0, energy_delta * self.energy_gain_reward)
+
         self.resources[RESOURCE_ENERGY] -= self.idle_cost
         if (self.resources[RESOURCE_ENERGY] <= 0):
             return self._death()
@@ -496,14 +517,17 @@ class TwiLand(gymnasium.Env):
                 self.spawn_enemies(1, self.get_enemy_power(self.time))
 
         # energy reward
-        partial_reward += np.log(self.resources[RESOURCE_ENERGY]) * env_reward_multiplier
+        partial_reward += np.log(self.resources[RESOURCE_ENERGY]) * env_reward_multiplier * self.energy_reward_factor
         # time reward
-        partial_reward += self.time * env_reward_multiplier
+        partial_reward += self.time * env_reward_multiplier * self.time_reward_factor
+        # successes reward
+        partial_reward += self.successful_actions * env_reward_multiplier * self.successes_reward_factor
 
-        return self.get_observation(), partial_reward, False, False, self.info
+        return self.get_observation(), partial_reward, False, self.time > self.max_days, self.info
 
     def step(self, action: int) -> tuple[Observation, float, bool, bool, dict]:
         act_type, data = parse_action(action)
+        self.last_energy = self.resources[RESOURCE_ENERGY]
         if act_type == ACTIONTYPE_MOVE:
             offset = position_offsets[data]
             target_square = step(self.land.shape, self.player_position, offset)
@@ -537,8 +561,10 @@ class TwiLand(gymnasium.Env):
             raise ValueError(f"Unable to process the given action as any type (action {action})")
 
     def render(self):
-        # May or may not get implemented
-        pass
+        import rendering
+        if not self.rendering_enabled:
+            self.enable_rendering()
+        rendering.update_display(self)
 
     def close(self):
         pass

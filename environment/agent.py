@@ -25,27 +25,26 @@ class AgentNet(nn.Module):
         # This can be obtained from Observation.configured_size()
         self.fc1 = nn.Linear(Observation.configured_size(), 500)
         self.batch_norm1 = nn.BatchNorm1d(500, affine=False, track_running_stats=False)
-        self.relu = nn.ReLU()
+        self.act1 = nn.Sigmoid()
         self.fc2 = nn.Linear(500, 300)
         self.batch_norm2 = nn.BatchNorm1d(300, affine=False, track_running_stats=False)
-        self.relu2 = nn.ReLU()
-        self.fc3 = nn.Linear(500, 50)
-        self.relu3 = nn.ReLU()
+        self.act2 = nn.ReLU()
         # Output size based on number of actions
         self.fc3 = nn.Linear(300, len(ACTIONSET_ALL))
+        self.act3 = nn.Sigmoid()
 
 
     def forward(self, x):
         x = self.fc1(x)
         #x = self.batch_norm1(x.view(x.size(0), -1))
         #x = x.view(x.size(0), -1)
-        x = self.relu(x)
+        x = self.act1(x)
         #print(len(x), "x shape")
         x = self.fc2(x)
         #x = self.batch_norm2(x.view(x.size(0), -1))
-        x = self.relu2(x)
+        x = self.act2(x)
         x = self.fc3(x)
-        x = self.relu3(x)
+        x = self.act3(x)
         #x = self.fc4(x)
         #x = F.softmax(x, dim=-1)
         return x
@@ -68,7 +67,8 @@ class Agent:
         if game is not None:
             self.env = game
         else:
-            self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=enable_rendering, starting_energy=self.energy, fail_reward=-15)
+            self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=enable_rendering, starting_energy=self.energy, 
+                fail_reward=-15, time_reward_factor=0, energy_reward_factor=0.25, successes_reward_factor=5, energy_gain_reward=10)
 
         self.memory_size = memory_size if memory_size is not None else 1000
 
@@ -176,7 +176,7 @@ class Agent:
                     times["Learning Net Update"] += time() - t6
                 t5 = time()
                 times["Learning"] += t5 - t4
-                if self.env.enable_rendering: 
+                if self.env.rendering_enabled: 
                     rendering.basic_event_loop()
                     rendering.set_title_text(f"Episode {epoch}; Score = {total_reward:.1f}")
                     rendering.update_display(self.env)
