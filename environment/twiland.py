@@ -470,12 +470,12 @@ class TwiLand(gymnasium.Env):
         return num_fights, True
 
     def _fail(self) -> tuple[Observation, float, bool, bool, dict]:
-        return self._environment_turn(self.fail_reward)
+        return self._environment_turn(self.fail_reward, env_reward_multiplier = 0.1)
 
     def _death(self) -> tuple[Observation, float, bool, bool, dict]:
         return self.get_observation(), -1000, True, False, self.info
 
-    def _environment_turn(self, partial_reward = 0) -> tuple[Observation, float, bool, bool, dict]:
+    def _environment_turn(self, partial_reward = 0, env_reward_multiplier = 1) -> tuple[Observation, float, bool, bool, dict]:
         self.tstep += 1
         self.time += 1 / (self.actions_per_day + self.actions_per_night)
         self.resources[RESOURCE_ENERGY] -= self.idle_cost
@@ -489,16 +489,16 @@ class TwiLand(gymnasium.Env):
             fights, survived = self._check_enemy_attacks(allow_move=True)
             if not survived:
                 return self._death()
-            partial_reward += fights * self.fight_reward
+            partial_reward += fights * self.fight_reward * env_reward_multiplier
             # After their move, a new enemy may spawn...
             prob = (scipy.special.expit(self.time / 3) * 2 - 1) / self.actions_per_night
             if rng.random() < prob:
                 self.spawn_enemies(1, self.get_enemy_power(self.time))
 
         # energy reward
-        partial_reward += np.log(self.resources[RESOURCE_ENERGY])
+        partial_reward += np.log(self.resources[RESOURCE_ENERGY]) * env_reward_multiplier
         # time reward
-        partial_reward += self.time
+        partial_reward += self.time * env_reward_multiplier
 
         return self.get_observation(), partial_reward, False, False, self.info
 
@@ -515,7 +515,7 @@ class TwiLand(gymnasium.Env):
             victories, survived = self._check_enemy_attacks(allow_move=False)
             if not survived:
                 return self._death()
-            return self._environment_turn(victories * self.fight_reward)
+            return self._environment_turn(victories * self.fight_reward, 0.25 if victories == 0 and offset == (0,0) else 1)
         elif act_type == ACTIONTYPE_INTERACT:
             offset = position_offsets[data]
             target_square = step(self.land.shape, self.player_position, offset)

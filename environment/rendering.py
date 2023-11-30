@@ -1,4 +1,5 @@
 import pygame
+import sys
 
 from twiland import TwiLand
 from utils import *
@@ -112,3 +113,9 @@ def update_display(env : TwiLand):
     pygame.display.flip()
 
     # Simple pygame program
+
+def basic_event_loop():
+    for e in pygame.event.get():
+        if e.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
