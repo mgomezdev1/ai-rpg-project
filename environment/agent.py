@@ -70,7 +70,7 @@ class Agent:
             self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=enable_rendering, starting_energy=self.energy, 
                 fail_reward=-15, time_reward_factor=0, energy_reward_factor=0.25, successes_reward_factor=5, energy_gain_reward=10)
 
-        self.memory_size = memory_size if memory_size is not None else 1000
+        self.memory_size = memory_size if memory_size is not None else 50000
 
     def store_experience(self, experience):
         if (len(self.replay_buffer) >= self.memory_size):
@@ -178,7 +178,7 @@ class Agent:
                 times["Learning"] += t5 - t4
                 if self.env.rendering_enabled: 
                     rendering.basic_event_loop()
-                    rendering.set_title_text(f"Episode {epoch}; Score = {total_reward:.1f}")
+                    rendering.set_title_text(f"Episode {epoch}; Score = {total_reward:.1f}; Day {self.env.time:.0f}")
                     rendering.update_display(self.env)
                 times["Rendering"] += time() - t5
 

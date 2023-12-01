@@ -89,3 +89,7 @@ def dict_to_array(dictionary: dict[int, float], size: int):
     result = np.zeros(size)
     for k,v in dictionary.items(): result[k] = v
     return result
+
+def hex_to_rgb(hex: str) -> tuple[int,int,int]:
+  if hex.startswith("#"): hex = hex[1:]
+  return tuple(int(hex[i:i+2], 16) for i in (0, 2, 4))

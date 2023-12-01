@@ -1,19 +1,25 @@
+from typing import Literal, TypeAlias
 import pygame
 import sys
 
-from twiland import TwiLand
+from twiland import VIEW_DISTANCE, VIEW_NORM, NormType, Observation, TwiLand, get_mask, land_info
 from utils import *
 
 rendering_enabled = False
 screen : pygame.Surface = None
 font : pygame.font.Font = None
 large_font : pygame.font.Font = None
+RENDER_FULL = "full"
+RENDER_OBS = "obs"
+RenderMode: TypeAlias = Literal["full","obs"]
+rendering_mode : RenderMode = RENDER_FULL
 
 preloaded_skill_images : dict[int, pygame.Surface] = {}
 preloaded_resource_images : dict[int, pygame.Surface] = {}
 
 # Set the width and height of the screen [width, height]
 SCREEN_SIZE = (1200, 800)
+BACKGROUND_COLOR = (15,15,15)
 
 # Colors
 PLAYER_COLOR = (125,0,255)
@@ -46,6 +52,28 @@ def env_to_screen(env : TwiLand, coord: tuple[int,int], transpose: bool = True) 
     pixel_size = tuple(mx / sx for sx,mx in zip(env.land.shape, MAP_SIZE))
     return tuple(offset + (x + 0.5) * px for offset,x,px in zip(MAP_OFFSETS, coord, pixel_size))
 
+land_colors = {}
+def render_observation_map(observation: Observation, view_distance: int = VIEW_DISTANCE, view_norm : NormType = VIEW_NORM):
+    from matplotlib import pyplot as plt
+    mask = get_mask(view_distance * 2 + 1, view_norm)
+    shape = mask.shape
+    map_matrix = np.zeros(shape, dtype=np.int8)
+    mask_size = mask.sum()
+    enemy_id = len(land_info) + 1
+    np.place(map_matrix, mask, observation.flat_enemies.astype(np.int8) * enemy_id)
+    for i,t in enumerate(land_info):
+        new_elements = np.zeros(shape)
+        np.place(new_elements, mask, observation.flat_neighbors_encoded[i*mask_size:(i+1)*mask_size] * (t.id + 1))
+        map_matrix = np.maximum(map_matrix, new_elements)
+    mx, my = map_matrix.shape
+    width, height = MAP_SIZE
+    left, top = MAP_OFFSETS
+    dx, dy = width / mx, height / my
+    for i in range(my):
+        for j in range(mx):
+            col = land_colors[map_matrix[i,j] - 1]
+            pygame.draw.rect(screen, col, (left + dx * j, top + dy * i, dx, dy))    
+
 def enable_rendering():
     global rendering_enabled
     global screen
@@ -70,25 +98,40 @@ def enable_rendering():
         preloaded_resource_images[identifier] = pygame.transform.scale(pygame.image.load(f"./icons/{img_name}.png"), (ICON_SIZE, ICON_SIZE))
     for identifier, img_name in [(SKILL_CHOPPING, "Chopping_Skill"), (SKILL_FISHING, "Fishing_Skill"), (SKILL_MINING, "Mining_Skill"), (SKILL_CRAFTING, "Crafting_Skill"), (SKILL_COMBAT, "Combat_Skill")]:
         preloaded_skill_images[identifier] = pygame.transform.scale(pygame.image.load(f"./icons/{img_name}.png"), (ICON_SIZE, ICON_SIZE))
+    global land_colors
+    for l in land_info:
+        land_colors[l.id] = hex_to_rgb(l.color)
+    land_colors[-1] = (0,0,0)
+    land_colors[len(land_info)] = ENEMY_COLOR
 
 def set_title_text(new_text: str):
     global title
     title = new_text
+
+def set_rendering_mode(new_rendering_mode: RenderMode):
+    global rendering_mode
+    rendering_mode = new_rendering_mode
+    
+def toggle_rendering_mode():
+    set_rendering_mode(RENDER_FULL if rendering_mode == RENDER_OBS else RENDER_OBS)
 
 # Used to manage how fast the screen updates
 clock = pygame.time.Clock()
 
 def update_display(env : TwiLand):
     # --- Screen-clearing code goes here
-    screen.fill((0,0,0))
+    screen.fill(BACKGROUND_COLOR)
  
     # --- Drawing code should go here
-    map_img = pygame.transform.scale(pygame.image.load(env.map_img_path), MAP_SIZE)
-    screen.blit(map_img, MAP_OFFSETS, map_img.get_rect())
+    if rendering_mode == RENDER_FULL:
+        map_img = pygame.transform.scale(pygame.image.load(env.map_img_path), MAP_SIZE)
+        screen.blit(map_img, MAP_OFFSETS, map_img.get_rect())
 
-    pygame.draw.circle(screen, PLAYER_COLOR, env_to_screen(env, env.player_position), pixel_size[0])
-    for enemy in env.enemies:
-        pygame.draw.circle(screen, ENEMY_COLOR, env_to_screen(env, enemy.position), pixel_size[0])
+        pygame.draw.circle(screen, PLAYER_COLOR, env_to_screen(env, env.player_position), pixel_size[0])
+        for enemy in env.enemies:
+            pygame.draw.circle(screen, ENEMY_COLOR, env_to_screen(env, enemy.position), pixel_size[0])
+    else:
+        render_observation_map(env.get_observation())
 
     y = ICON_SIZE + ICON_SPACING
     for skill in ORDERED_SKILLSET:
@@ -119,3 +162,6 @@ def basic_event_loop():
         if e.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+        if e.type == pygame.KEYDOWN:
+            if e.key == pygame.K_TAB:
+                toggle_rendering_mode()

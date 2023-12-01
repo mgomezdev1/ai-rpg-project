@@ -44,6 +44,8 @@ while True:
                         dead = True
             if e.key == pygame.K_p:
                 twiland.draw_world(env.land, env.player_position, [e.position for e in env.enemies], show=True)
+            if e.key == pygame.K_TAB:
+                rendering.toggle_rendering_mode()
         if e.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
