@@ -14,6 +14,14 @@ from collections import defaultdict
 
 times = defaultdict(float)
 
+# ADJUSTMENTS:
+# gamma = 0.9 (discount factor)
+# batch_size = 128
+# lr = 0.01
+# add 4th layer, use softmax activation
+# increase epoch count to 200
+# adjust episodes to 200
+
 #from actions import ACTIONSET_MOVE, ACTIONTYPE_MOVE, ACTIONTYPE_INTERACT, ACTIONTYPE_TRAIN, SKILL_CHOPPING, SKILL_COMBAT, SKILL_CRAFTING, SKILL_FISHING, SKILL_MINING, SKILLSET, parse_action, position_offsets
 from twiland import VIEW_DISTANCE, DEFAULT_MAP_SIZE, Observation, TwiLand, generate_map
 
@@ -30,8 +38,10 @@ class AgentNet(nn.Module):
         self.batch_norm2 = nn.BatchNorm1d(300, affine=False, track_running_stats=False)
         self.act2 = nn.ReLU()
         # Output size based on number of actions
-        self.fc3 = nn.Linear(300, len(ACTIONSET_ALL))
+        self.fc3 = nn.Linear(300, 100)
         self.act3 = nn.Sigmoid()
+        self.fc4 = nn.Linear(100, len(ACTIONSET_ALL))
+        self.act4 = nn.Sigmoid()
 
 
     def forward(self, x):
@@ -45,8 +55,8 @@ class AgentNet(nn.Module):
         x = self.act2(x)
         x = self.fc3(x)
         x = self.act3(x)
-        #x = self.fc4(x)
-        #x = F.softmax(x, dim=-1)
+        x = self.fc4(x)
+        x = self.act4(x)
         return x
     
 class Agent:
@@ -77,7 +87,7 @@ class Agent:
             self.replay_buffer.pop(int(random.random() * self.memory_size))
         self.replay_buffer.append(experience)
 
-    def learn(self, lr: float = 0.1, epochs: int = 100, batch_size: int = 32):
+    def learn(self, lr: float = 0.01, epochs: int = 200, batch_size: int = 128):
         optimizer = optim.Adam(self.net.parameters(), lr=lr) # learning rate schedule?
         criterion = nn.MSELoss()
         energy_decay = np.log(40 / self.energy) / epochs
@@ -99,7 +109,7 @@ class Agent:
                 self.env.set_map(generate_map((self.map_size, self.map_size)))
             
             # Disable energy decay
-            # self.env.starting_energy = int(self.energy * np.exp(energy_decay * epoch))
+            #self.env.starting_energy = int(self.energy * np.exp(energy_decay * epoch))
 
             print("Starting Energy: ", self.env.starting_energy)
 
@@ -111,6 +121,9 @@ class Agent:
                 action = self.select_action(observation, exploration_rate=max(epsilon_min, min(epsilon, 1.0 - np.log10((epoch + 1) * epsilon_decay))))
                 t2 = time()
                 times["Action Selection"] += t2 - t1
+
+                if action is None:
+                    print(f"Action: {action}")
                 # Throws away the game if something blows up
                 if action == -1:
                     game_finished = True
@@ -155,9 +168,10 @@ class Agent:
                     with torch.no_grad():
                         q_values_next = self.targetnet(next_obs_tensor)
                         target_q_values = q_values_current.clone().detach()
+                        gamma = 0.9
                         max_rewards, _ = torch.max(q_values_next, dim=1)
                         continues_mask = (~finalized).float()
-                        target_q_values[range(batch_size), actions] = rewards + max_rewards * continues_mask
+                        target_q_values[range(batch_size), actions] = rewards + gamma * max_rewards * continues_mask
                     t8 = time()
                     loss = criterion(q_values_current, target_q_values)
                     loss.backward()
@@ -196,18 +210,18 @@ class Agent:
         with torch.no_grad():
             action_logits = self.net(flattened_data)
             
-            # Check for invalid values in action_logits
+            # check for invalid logit values
             if torch.isnan(action_logits).any() or torch.isinf(action_logits).any():
                 print("Invalid values detected in action_logits.")
-                return -1  # Or handle this case appropriately
+                return -1
 
-            # Apply softmax to get probabilities
+            # convert logits to probabilities
             action_prob = torch.exp(torch.log_softmax(action_logits, dim=-1) + 1e-8)
             
-            # Check for invalid values in action_prob
+            # check for invalid probability values
             if torch.isnan(action_prob).any() or torch.isinf(action_prob).any():
                 print("Invalid values detected in action_prob.")
-                return -1  # Or handle this case appropriately
+                return -1 
 
             if random.random() < exploration_rate:
                 action = random.randrange(0, len(ACTIONSET_ALL))
@@ -252,13 +266,13 @@ class Agent:
             self.net.load_state_dict(state)
 
 #train the agent
-num_episodes = [100,500,1000,5000]
+num_episodes = [200]#,500,1000,5000]
 max_steps = 1000
 scores = {} # list containing scores from each episode
 
 for model in num_episodes:
     model_scores = []
-    agent = Agent(map_size=50, generate_new=True, memory_size=1000, enable_rendering=True)
+    agent = Agent(map_size=50, generate_new=True, memory_size=1000, enable_rendering=False)
     agent.learn(epochs=model)
 
     # Generate a new game to test on
@@ -283,4 +297,4 @@ for model, scores in scores.items():
     plt.plot(np.arange(len(scores)), scores)
     plt.ylabel('Score')
     plt.xlabel('Episode #')
-    #plt.show()
+    plt.show()
