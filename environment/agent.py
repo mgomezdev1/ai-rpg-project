@@ -23,14 +23,14 @@ class AgentNet(nn.Module):
         super(AgentNet, self).__init__()
         # Input size based on number of outputs from Observation
         # This can be obtained from Observation.configured_size()
-        self.fc1 = nn.Linear(Observation.configured_size(), 500)
-        self.batch_norm1 = nn.BatchNorm1d(500, affine=False, track_running_stats=False)
+        self.fc1 = nn.Linear(Observation.configured_size(), 1000)
+        self.batch_norm1 = nn.BatchNorm1d(1000, affine=False, track_running_stats=False)
         self.act1 = nn.Sigmoid()
-        self.fc2 = nn.Linear(500, 300)
-        self.batch_norm2 = nn.BatchNorm1d(300, affine=False, track_running_stats=False)
+        self.fc2 = nn.Linear(1000, 800)
+        self.batch_norm2 = nn.BatchNorm1d(800, affine=False, track_running_stats=False)
         self.act2 = nn.ReLU()
         # Output size based on number of actions
-        self.fc3 = nn.Linear(300, len(ACTIONSET_ALL))
+        self.fc3 = nn.Linear(800, len(ACTIONSET_ALL))
         self.act3 = nn.Sigmoid()
 
 
@@ -55,7 +55,7 @@ class Agent:
         self.targetnet = AgentNet()
         self.generate_new = generate_new
         self.replay_buffer = []
-        self.energy = 100
+        self.energy = 500
         self.learning_update_interval = 100
         # Sets the map size
         if map_size is None:
@@ -68,7 +68,7 @@ class Agent:
             self.env = game
         else:
             self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=enable_rendering, starting_energy=self.energy, 
-                fail_reward=-15, time_reward_factor=0, energy_reward_factor=0.25, successes_reward_factor=5, energy_gain_reward=10)
+                fail_reward=-50, time_reward_factor=0, energy_reward_factor=0.1, successes_reward_factor=5, energy_gain_reward=30, death_reward=-100000)
 
         self.memory_size = memory_size if memory_size is not None else 50000
 
@@ -84,6 +84,7 @@ class Agent:
         epsilon = 0.5
         epsilon_min = 0.01
         epsilon_decay = 0.995
+        GAMMA = 0.995
         learning_cooldown = self.learning_update_interval
         running_rewards = []
 
@@ -106,6 +107,7 @@ class Agent:
             game_finished = False
             observation, _ = self.env.reset()
             times["Map Resetting"] += time() - t0
+            total_actions = 0
             while not game_finished:
                 t1 = time()
                 action = self.select_action(observation, exploration_rate=max(epsilon_min, min(epsilon, 1.0 - np.log10((epoch + 1) * epsilon_decay))))
@@ -157,7 +159,7 @@ class Agent:
                         target_q_values = q_values_current.clone().detach()
                         max_rewards, _ = torch.max(q_values_next, dim=1)
                         continues_mask = (~finalized).float()
-                        target_q_values[range(batch_size), actions] = rewards + max_rewards * continues_mask
+                        target_q_values[range(batch_size), actions] = rewards + max_rewards * continues_mask * GAMMA
                     t8 = time()
                     loss = criterion(q_values_current, target_q_values)
                     loss.backward()
@@ -180,6 +182,8 @@ class Agent:
                     rendering.basic_event_loop()
                     rendering.set_title_text(f"Episode {epoch}; Score = {total_reward:.1f}; Day {self.env.time:.0f}")
                     rendering.update_display(self.env)
+                    total_actions += 1
+                    rendering.set_info_text(f"Successes: {self.env.successful_actions:.0f}/{total_actions} ({self.env.successful_actions/total_actions:.1%})")
                 times["Rendering"] += time() - t5
 
                 observation = next_observation
@@ -267,8 +271,7 @@ for model in num_episodes:
     #agent.env.starting_energy = 50
     for episode in range(100):
         agent.env.reset()
-        episode_reward = agent.play(agent.env) + 1000
-        # Add 1000 to reward to account for death
+        episode_reward = agent.play(agent.env) - agent.env.death_reward
         if not np.isinf(episode_reward):
             print(f"Episode {episode + 1}/{100}, Total Reward: {episode_reward}")
             model_scores.append(episode_reward)

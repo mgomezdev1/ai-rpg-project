@@ -41,6 +41,8 @@ TEXT_TOP_OFFSET = ICON_SIZE / 2 - FONT_SIZE / 2
 # Title text
 TITLE_MARGIN = 10
 title = ""
+INFO_MARGIN = 5
+info = ""
 
 # Will get recalculated on certain functions (side effects!)
 pixel_size = (1,1)
@@ -107,6 +109,9 @@ def enable_rendering():
 def set_title_text(new_text: str):
     global title
     title = new_text
+def set_info_text(new_text: str):
+    global info
+    info = new_text
 
 def set_rendering_mode(new_rendering_mode: RenderMode):
     global rendering_mode
@@ -151,6 +156,8 @@ def update_display(env : TwiLand):
 
     title_txt = large_font.render(title, True, (255,255,255))
     screen.blit(title_txt, (SCREEN_SIZE[0] / 2 - title_txt.get_rect().width / 2, TITLE_MARGIN), title_txt.get_rect())
+    info_txt = font.render(info, True, (255,255,255))
+    screen.blit(info_txt, (INFO_MARGIN, SCREEN_SIZE[1] - title_txt.get_rect().height - INFO_MARGIN), info_txt.get_rect())
 
     # --- Go ahead and update the screen with what we've drawn.
     pygame.display.flip()

@@ -37,19 +37,21 @@ LAND_COMPRESSION = False
 DEFAULT_MAP_SIZE = 50
 
 class LandType:
-    def __init__(self, name: str, id: int, representation: str, color: str, move_cost: float, harvest: Recipe):
+    def __init__(self, name: str, id: int, representation: str, color: str, move_cost: float, harvest: Recipe, is_harvest_failure: bool = False):
         self.name = name
         self.id = id
         self.representation = representation
         self.color = color
         self.move_cost = move_cost,
         self.harvest = harvest
+        self.is_harvest_failure = is_harvest_failure
 
 land_info = [
     LandType("Plains", LAND_PLAINS, colored("P", "black", "on_light_green"), "#44ff55", 0.1,
         Recipe(
             {RESOURCE_ENERGY: 1} # Wastes one energy
-        )
+        ),
+        is_harvest_failure=True
     ),
     LandType("Forest", LAND_FOREST, colored("F", "white", "on_green"), '#00bb00', 0.15,
         RecipeStack(
@@ -348,14 +350,15 @@ class Enemy:
             )
         )
 
+RESOURCE_TIERS = [1, 10, 25, 50, 75, 100, 500, 1000, 10000]
 class Observation:
     def __init__(self, neighbours: np.ndarray[int], enemies: np.ndarray[int], time: float, skills: np.ndarray[float], resources: np.ndarray[int], view_mask: np.ndarray[bool]):
         self.flat_neighbors = np.extract(view_mask, neighbours)
         self.flat_neighbors_encoded = np.concatenate([(self.flat_neighbors == land_info[i].id).ravel() for i in range(len(land_info))])
         self.flat_enemies   = np.extract(view_mask, enemies)
-        self.sigmoid_time   = scipy.special.expit(np.array([time / 5 - 1, ((time % 1) - 0.5) * 10]))
-        self.sigmoid_skills = scipy.special.expit(skills / 5 - 1)
-        self.sigmoid_resources = scipy.special.expit(resources / 5 - 1)
+        self.sigmoid_time   = scipy.special.expit(np.array([time / 5 - 5, ((time % 1) - 0.5) * 10]))
+        self.sigmoid_skills = scipy.special.expit(skills / 5 - 5)
+        self.sigmoid_resources = np.concatenate([scipy.special.expit(resources / x - x) for x in RESOURCE_TIERS])
         # Not sure if we want to include sigmoid_resources in flattened data
         self.flattened_data = np.concatenate([self.flat_neighbors_encoded, self.flat_enemies, self.sigmoid_time, self.sigmoid_skills], axis=0, dtype=np.float32)
 
@@ -366,25 +369,22 @@ class Observation:
         return TwiLand(generate_map((3 * VIEW_DISTANCE, 3 * VIEW_DISTANCE)), enable_rendering=False).get_observation().flattened_data.shape[0]
 
 class TwiLand(gymnasium.Env):
-    def __init__(self, land: np.ndarray[int], player_position: tuple[int,int] | None = None, enable_rendering = True, 
-            fail_reward: float = -1, fight_reward: float = 50, craft_reward: float = 20, harvest_reward: float = 5, survival_reward: float = 1,
+    def __init__(self, land: np.ndarray[int] | None = None, player_position: tuple[int,int] | None = None, enable_rendering = True, 
+            fail_reward: float = -1, death_reward: float = -1000, fight_reward: float = 50, craft_reward: float = 20, harvest_reward: float = 5, survival_reward: float = 1,
             max_days: float = 100, starting_energy: int = 10, actions_per_day: int = 10, actions_per_night: int = 10, idle_cost: float = 0.1, enemy_difficulty_scaling: tuple[float] = (0,1.0,),
             time_reward_factor: float = 1, energy_reward_factor: float = 1, successes_reward_factor: float = 1, energy_gain_reward: float = 1,
             **kwargs):
+        if land is None:
+            land = generate_map((DEFAULT_MAP_SIZE, DEFAULT_MAP_SIZE))
         self.land = land
-        if not player_position:
-            player_position = random_pos(land.shape)
-        self.player_position = player_position
         self.enemies : list[Enemy] = []
 
-        self.player_skills = np.ones(len(SKILLSET))
-        self.resources = dict_to_array({RESOURCE_ENERGY: starting_energy}, len(RESOURCESET))
-        self.time: float = 0
-        self.tstep: int = 0 
+        self.starting_energy = starting_energy
         self.actions_per_day = actions_per_day
         self.actions_per_night = actions_per_night
         self.map_img_path = kwargs.get("img_path", "./temp/img/twiland_map.png")
         self.fail_reward = fail_reward
+        self.death_reward = death_reward
         self.fight_reward = fight_reward
         self.craft_reward = craft_reward
         self.harvest_reward = harvest_reward
@@ -397,10 +397,13 @@ class TwiLand(gymnasium.Env):
         self.successes_reward_factor = successes_reward_factor
         self.energy_gain_reward = energy_gain_reward
 
-        # variables for reset
-        self.starting_energy = starting_energy
-        self.successful_actions = 0
-        self.last_energy = self.resources[RESOURCE_ENERGY]
+        # reset
+        self.reset()
+
+        # reset overrides
+        if player_position:
+            self.player_position = player_position
+        
 
         self.rendering_enabled = False
         self.info = {}
@@ -454,6 +457,7 @@ class TwiLand(gymnasium.Env):
         self.last_energy = self.resources[RESOURCE_ENERGY]
         self.last_resources = self.resources.copy()
         self.enemies = []
+        self.info = {}
 
         return (self.get_observation(), self.info)
 
@@ -489,7 +493,7 @@ class TwiLand(gymnasium.Env):
         return self._environment_turn(self.fail_reward, env_reward_multiplier = 0.1, success = False)
 
     def _death(self) -> tuple[Observation, float, bool, bool, dict]:
-        return self.get_observation(), -1000, True, False, self.info
+        return self.get_observation(), self.death_reward, True, False, self.info
 
     def _environment_turn(self, partial_reward = 0, env_reward_multiplier = 1, success: bool = True) -> tuple[Observation, float, bool, bool, dict]:
         self.tstep += 1
@@ -548,6 +552,8 @@ class TwiLand(gymnasium.Env):
                 return self._fail()
             self.resources = new_r
             self.player_skills = new_s
+            if land_info[self.land[target_square]].is_harvest_failure:
+                return self._fail()
             return self._environment_turn(self.harvest_reward)
         elif act_type == ACTIONTYPE_CRAFT:
             recipe = ORDERED_RECIPES[data]
