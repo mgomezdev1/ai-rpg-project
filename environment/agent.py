@@ -16,20 +16,16 @@ from collections import defaultdict
 
 times = defaultdict(float)
 
-#from actions import ACTIONSET_MOVE, ACTIONTYPE_MOVE, ACTIONTYPE_INTERACT, ACTIONTYPE_TRAIN, SKILL_CHOPPING, SKILL_COMBAT, SKILL_CRAFTING, SKILL_FISHING, SKILL_MINING, SKILLSET, parse_action, position_offsets
 from twiland import VIEW_DISTANCE, DEFAULT_MAP_SIZE, Observation, TwiLand, generate_map
 
 class AgentNet(nn.Module):
-    # I just kinda chose most of the numbers, we can play around with node amounts and add or remove layers
     def __init__(self):
         super(AgentNet, self).__init__()
         # Input size based on number of outputs from Observation
         # This can be obtained from Observation.configured_size()
         self.fc1 = nn.Linear(Observation.configured_size(), 1000)
-        self.batch_norm1 = nn.BatchNorm1d(1000, affine=False, track_running_stats=False)
         self.act1 = nn.Sigmoid()
         self.fc2 = nn.Linear(1000, 800)
-        self.batch_norm2 = nn.BatchNorm1d(800, affine=False, track_running_stats=False)
         self.act2 = nn.ReLU()
         # Output size based on number of actions
         self.fc3 = nn.Linear(800, len(ACTIONSET_ALL))
@@ -38,17 +34,11 @@ class AgentNet(nn.Module):
 
     def forward(self, x):
         x = self.fc1(x)
-        #x = self.batch_norm1(x.view(x.size(0), -1))
-        #x = x.view(x.size(0), -1)
         x = self.act1(x)
-        #print(len(x), "x shape")
         x = self.fc2(x)
-        #x = self.batch_norm2(x.view(x.size(0), -1))
         x = self.act2(x)
         x = self.fc3(x)
         x = self.act3(x)
-        #x = self.fc4(x)
-        #x = F.softmax(x, dim=-1)
         return x
     
 class Agent:
@@ -83,8 +73,9 @@ class Agent:
     def learn(self, lr: float = 0.1, epochs: int = 100, batch_size: int = 32):
         optimizer = optim.Adam(self.net.parameters(), lr=lr) # learning rate schedule?
         criterion = nn.MSELoss()
-        energy_decay = np.log(40 / self.energy) / epochs
+        #energy_decay = np.log(40 / self.energy) / epochs
         decay_values = np.linspace(self.energy, 100, num=epochs).astype(int)
+        # set exploration rate parameters
         epsilon = 1
         epsilon_min = 0.01
         epsilon_decay = 0.995
@@ -98,9 +89,6 @@ class Agent:
             t0 = time()
             # generates a new map if necessary
             if self.generate_new:
-                # Do not generate a new environment per epoch, this is very costly and breaks things like rendering, simply reset the variables you need to reset
-                #self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=False, starting_energy=int(self.energy * np.exp(energy_decay * epoch)))
-                                   #, idle_cost=np.round(0.1*(1/epochs)*epoch, 4))
                 self.env.set_map(generate_map((self.map_size, self.map_size)))
             
             # Disable energy decay
@@ -168,7 +156,6 @@ class Agent:
                     t8 = time()
                     loss = criterion(q_values_current, target_q_values)
                     loss.backward()
-                    #torch.nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=1.0)
                     optimizer.step()
                     t9 = time()
                     times["MaxQ"] += t8 - t7
@@ -208,7 +195,7 @@ class Agent:
             # Check for invalid values in action_logits
             if torch.isnan(action_logits).any() or torch.isinf(action_logits).any():
                 print("Invalid values detected in action_logits.")
-                return -1  # Or handle this case appropriately
+                return -1  
 
             # Apply softmax to get probabilities
             action_prob = torch.exp(torch.log_softmax(action_logits, dim=-1) + 1e-8)
@@ -216,7 +203,7 @@ class Agent:
             # Check for invalid values in action_prob
             if torch.isnan(action_prob).any() or torch.isinf(action_prob).any():
                 print("Invalid values detected in action_prob.")
-                return -1  # Or handle this case appropriately
+                return -1 
 
             if random.random() < exploration_rate:
                 action = random.randrange(0, len(ACTIONSET_ALL))
@@ -235,8 +222,6 @@ class Agent:
             # forward pass for action probabilities
             # sample an action from the probability distribution
             action = self.select_action(observation)
-            # or pick the action with the highest probability
-            # action = torch.argmax(action_prob).item()
 
             # take the decided action
             observation, reward, ter, tru, _  = game.step(action)
@@ -263,7 +248,7 @@ class Agent:
 print(torch.cuda.is_available())
 print(torch.backends.cudnn.enabled)
 #train the agent
-num_episodes = [1] #,500,1000,5000]
+num_episodes = [100] #,500,1000,5000]
 max_steps = 1000
 scores = {} # list containing scores from each episode
 
