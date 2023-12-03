@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import torch
 import random
 import os
+from numba import cuda
+import torch.cuda
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
@@ -68,7 +70,8 @@ class Agent:
             self.env = game
         else:
             self.env = TwiLand(generate_map((self.map_size, self.map_size)), enable_rendering=enable_rendering, starting_energy=self.energy, 
-                fail_reward=-50, time_reward_factor=0, energy_reward_factor=0.1, successes_reward_factor=5, energy_gain_reward=30, death_reward=-100000)
+                fail_reward=0, time_reward_factor=1.5, energy_reward_factor=0, successes_reward_factor=1.5, energy_gain_reward=50, death_reward=-100000,
+                max_days=30, enemy_spawning=False)
 
         self.memory_size = memory_size if memory_size is not None else 50000
 
@@ -81,14 +84,15 @@ class Agent:
         optimizer = optim.Adam(self.net.parameters(), lr=lr) # learning rate schedule?
         criterion = nn.MSELoss()
         energy_decay = np.log(40 / self.energy) / epochs
-        epsilon = 0.5
+        decay_values = np.linspace(self.energy, 100, num=epochs).astype(int)
+        epsilon = 1
         epsilon_min = 0.01
         epsilon_decay = 0.995
         GAMMA = 0.995
         learning_cooldown = self.learning_update_interval
         running_rewards = []
 
-        for epoch in tqdm(range(epochs)): 
+        for epoch in range(epochs): 
             total_reward = 0
 
             t0 = time()
@@ -101,6 +105,7 @@ class Agent:
             
             # Disable energy decay
             # self.env.starting_energy = int(self.energy * np.exp(energy_decay * epoch))
+            self.env.starting_energy = decay_values[epoch]
 
             print("Starting Energy: ", self.env.starting_energy)
 
@@ -189,8 +194,8 @@ class Agent:
                 observation = next_observation
                 
             running_rewards.append(total_reward)
-            print(len(self.replay_buffer))
-            print(f"\n {times}")
+            #print(len(self.replay_buffer))
+            #print(f"\n {times}")
             print(f"REWARD: {total_reward}")
 
 
@@ -255,20 +260,21 @@ class Agent:
             state = torch.load(f)
             self.net.load_state_dict(state)
 
+print(torch.cuda.is_available())
+print(torch.backends.cudnn.enabled)
 #train the agent
-num_episodes = [100,500,1000,5000]
+num_episodes = [1] #,500,1000,5000]
 max_steps = 1000
 scores = {} # list containing scores from each episode
 
 for model in num_episodes:
     model_scores = []
-    agent = Agent(map_size=50, generate_new=True, memory_size=1000, enable_rendering=True)
+    agent = Agent(map_size=16, generate_new=True, memory_size=1000, enable_rendering=False)
     agent.learn(epochs=model)
 
     # Generate a new game to test on
-    # This is done on agent creation!!!
-    # agent.env = TwiLand(generate_map((agent.map_size, agent.map_size)), enable_rendering=False, starting_energy=50)
-    #agent.env.starting_energy = 50
+    agent.env = TwiLand(generate_map((agent.map_size, agent.map_size)), enable_rendering=False, starting_energy=50)
+
     for episode in range(100):
         agent.env.reset()
         episode_reward = agent.play(agent.env) - agent.env.death_reward
