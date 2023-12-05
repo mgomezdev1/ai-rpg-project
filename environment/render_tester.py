@@ -50,7 +50,7 @@ while True:
             pygame.quit()
             sys.exit()
     
-    rendering.set_title_text(f"Current Day: {env.time:.0f}. Score: {score}")
+    rendering.set_title_text(f"Current Day: {env.time:.0f}. Score: {score:.0f}")
     rendering.update_display(env)
  
     # --- Limit to 60 frames per second
