@@ -372,7 +372,7 @@ class TwiLand(gymnasium.Env):
     def __init__(self, land: np.ndarray[int] | None = None, player_position: tuple[int,int] | None = None, enable_rendering = True, 
             fail_reward: float = -1, death_reward: float = -1000, fight_reward: float = 50, craft_reward: float = 20, harvest_reward: float = 5, survival_reward: float = 1,
             max_days: float = 100, starting_energy: int = 10, actions_per_day: int = 10, actions_per_night: int = 10, idle_cost: float = 0.1, enemy_difficulty_scaling: tuple[float] = (0,1.0,),
-            time_reward_factor: float = 1, energy_reward_factor: float = 1, successes_reward_factor: float = 1, energy_gain_reward: float = 1,
+            time_reward_factor: float = 1, energy_reward_factor: float = 1, successes_reward_factor: float = 1, energy_gain_reward: float = 1, enemy_spawning: bool = True,
             **kwargs):
         if land is None:
             land = generate_map((DEFAULT_MAP_SIZE, DEFAULT_MAP_SIZE))
@@ -396,6 +396,7 @@ class TwiLand(gymnasium.Env):
         self.energy_reward_factor = energy_reward_factor 
         self.successes_reward_factor = successes_reward_factor
         self.energy_gain_reward = energy_gain_reward
+        self.enemy_spawning = enemy_spawning
 
         # reset
         self.reset()
@@ -492,12 +493,17 @@ class TwiLand(gymnasium.Env):
     def _fail(self) -> tuple[Observation, float, bool, bool, dict]:
         return self._environment_turn(self.fail_reward, env_reward_multiplier = 0.1, success = False)
 
-    def _death(self) -> tuple[Observation, float, bool, bool, dict]:
-        return self.get_observation(), self.death_reward, True, False, self.info
+    def _death(self, reward) -> tuple[Observation, float, bool, bool, dict]:
+        print("Time of Death: ", self.time)
+        return self.get_observation(), reward, True, False, self.info
 
     def _environment_turn(self, partial_reward = 0, env_reward_multiplier = 1, success: bool = True) -> tuple[Observation, float, bool, bool, dict]:
         self.tstep += 1
         self.time += 1 / (self.actions_per_day + self.actions_per_night)
+
+        if self.time > self.max_days:
+            return self._death(100000)
+
         if success: 
             self.successful_actions += env_reward_multiplier
             energy_delta = self.resources[RESOURCE_ENERGY] - self.last_energy
@@ -505,7 +511,7 @@ class TwiLand(gymnasium.Env):
 
         self.resources[RESOURCE_ENERGY] -= self.idle_cost
         if (self.resources[RESOURCE_ENERGY] <= 0):
-            return self._death()
+            return self._death(self.death_reward)
 
         if self.tstep >= self.actions_per_day + self.actions_per_night:
             self.tstep = 0
@@ -513,11 +519,11 @@ class TwiLand(gymnasium.Env):
             # Enemies only move during the night...
             fights, survived = self._check_enemy_attacks(allow_move=True)
             if not survived:
-                return self._death()
+                return self._death(self.death_reward)
             partial_reward += fights * self.fight_reward * env_reward_multiplier
             # After their move, a new enemy may spawn...
             prob = (scipy.special.expit(self.time / 3) * 2 - 1) / self.actions_per_night
-            if rng.random() < prob:
+            if self.enemy_spawning and rng.random() < prob:
                 self.spawn_enemies(1, self.get_enemy_power(self.time))
 
         # energy reward
@@ -542,7 +548,7 @@ class TwiLand(gymnasium.Env):
             self.resources[RESOURCE_ENERGY] -= move_cost
             victories, survived = self._check_enemy_attacks(allow_move=False)
             if not survived:
-                return self._death()
+                return self._death(self.death_reward)
             return self._environment_turn(victories * self.fight_reward, 0.25 if victories == 0 and offset == (0,0) else 1)
         elif act_type == ACTIONTYPE_INTERACT:
             offset = position_offsets[data]
