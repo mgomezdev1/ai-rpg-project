@@ -350,7 +350,7 @@ class Enemy:
             )
         )
 
-RESOURCE_TIERS = [1, 10, 25, 50, 75, 100, 500, 1000, 10000]
+RESOURCE_TIERS = [1, 10, 25, 100, 1000]
 class Observation:
     def __init__(self, neighbours: np.ndarray[int], enemies: np.ndarray[int], time: float, skills: np.ndarray[float], resources: np.ndarray[int], view_mask: np.ndarray[bool]):
         self.flat_neighbors = np.extract(view_mask, neighbours)
@@ -359,8 +359,8 @@ class Observation:
         self.sigmoid_time   = scipy.special.expit(np.array([time / 5 - 5, ((time % 1) - 0.5) * 10]))
         self.sigmoid_skills = scipy.special.expit(skills / 5 - 5)
         self.sigmoid_resources = np.concatenate([scipy.special.expit(resources / x - x) for x in RESOURCE_TIERS])
-        # Not sure if we want to include sigmoid_resources in flattened data
-        self.flattened_data = np.concatenate([self.flat_neighbors_encoded, self.flat_enemies, self.sigmoid_time, self.sigmoid_skills], axis=0, dtype=np.float32)
+        # We definitely want to include resources in the flattened data!
+        self.flattened_data = np.concatenate([self.flat_neighbors_encoded, self.flat_enemies, self.sigmoid_resources, self.sigmoid_time, self.sigmoid_skills], axis=0, dtype=np.float32)
 
     def __repr__(self) -> str:
         return f"N:{self.flat_neighbors_encoded} - E:{self.flat_enemies} - st:{self.sigmoid_time} -> {self.flattened_data.__repr__()}"
@@ -494,7 +494,7 @@ class TwiLand(gymnasium.Env):
         return self._environment_turn(self.fail_reward, env_reward_multiplier = 0.1, success = False)
 
     def _death(self, reward) -> tuple[Observation, float, bool, bool, dict]:
-        print("Time of Death: ", self.time)
+        # print("Time of Death: ", self.time)
         return self.get_observation(), reward, True, False, self.info
 
     def _environment_turn(self, partial_reward = 0, env_reward_multiplier = 1, success: bool = True) -> tuple[Observation, float, bool, bool, dict]:
@@ -527,7 +527,8 @@ class TwiLand(gymnasium.Env):
                 self.spawn_enemies(1, self.get_enemy_power(self.time))
 
         # energy reward
-        partial_reward += np.log(self.resources[RESOURCE_ENERGY]) * env_reward_multiplier * self.energy_reward_factor
+        if self.resources[RESOURCE_ENERGY] > 0:
+            partial_reward += np.log(self.resources[RESOURCE_ENERGY]) * env_reward_multiplier * self.energy_reward_factor
         # time reward
         partial_reward += self.time * env_reward_multiplier * self.time_reward_factor
         # successes reward
@@ -581,6 +582,21 @@ class TwiLand(gymnasium.Env):
     def close(self):
         pass
 
+    def clone(self):
+        result = TwiLand(self.land, self.player_position, self.enable_rendering, 
+            self.fail_reward, self.death_reward, self.fight_reward, self.craft_reward, self.harvest_reward, self.survival_reward,
+            self.max_days, self.starting_energy, self.actions_per_day, self.actions_per_night, self.idle_cost, self.enemy_difficulty_scaling,
+            self.time_reward_factor, self.energy_reward_factor, self.successes_reward_factor, self.energy_gain_reward, self.enemy_spawning)
+        result.enemies = self.enemies
+        result.info = self.info
+        result.time = self.time
+        result.tstep = self.tstep
+        result.successful_actions = self.successful_actions
+        result.player_skills = self.player_skills
+        result.resources = self.resources
+        result.last_energy = self.last_energy
+        result.last_resources = self.last_resources
+        return result
 # TESTING
 if __name__ == "__main__":
     env = TwiLand(generate_map((50,50)))
